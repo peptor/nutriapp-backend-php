@@ -7,5 +7,5 @@ Route::get('/', function () {
 });
 
 Route::get('/health', function () {
-    return response()->json(['status' => 'ok', 'service' => 'nutricion-rutines-api-php']);
+    return response()->json(['status' => 'ok', 'service' => 'nutrievo-api-php']);
 });

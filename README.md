@@ -1,4 +1,4 @@
-# NutriApp Backend (PHP / Laravel)
+# NutriEvo Backend (PHP / Laravel)
 
 Reimplementació completa del backend Node/Express/Prisma (`../backend`) fent servir **Laravel 13** + **Sanctum** + **Eloquent**, connectant a MySQL amb l'**esquema idèntic** (mateixos noms de taula i columna que Prisma), de manera que és intercanviable amb el backend Node a nivell de base de dades.
 

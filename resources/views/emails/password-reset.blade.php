@@ -13,8 +13,8 @@
 
           <tr>
             <td style="background:linear-gradient(135deg,#ecfdf5,#ccfbf1); padding:32px 32px 24px 32px; text-align:center;">
-              <img src="{{ $logoUrl }}" width="56" height="56" alt="NutriApp" style="display:block; margin:0 auto 12px auto; border-radius:12px;">
-              <h1 style="margin:0; font-size:22px; color:#065f46; font-weight:700;">NutriApp</h1>
+              <img src="{{ $logoUrl }}" width="56" height="56" alt="NutriEvo" style="display:block; margin:0 auto 12px auto; border-radius:12px;">
+              <h1 style="margin:0; font-size:22px; color:#065f46; font-weight:700;">NutriEvo</h1>
               <p style="margin:4px 0 0 0; font-size:13px; color:#0f766e;">Seguiment clínic entre visites</p>
             </td>
           </tr>

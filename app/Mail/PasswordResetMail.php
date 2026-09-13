@@ -20,7 +20,7 @@ class PasswordResetMail extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Recupera la teva contrasenya · NutriApp');
+        return new Envelope(subject: 'Recupera la teva contrasenya · NutriEvo');
     }
 
     public function content(): Content
