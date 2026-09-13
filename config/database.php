@@ -59,8 +59,13 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // Connexions persistents: reaprofita la connexió TCP entre peticions PHP-FPM
+            // en lloc d'obrir-ne una de nova a cada request. Alguns hostings compartits
+            // (com Hostinger) limiten les connexions noves per hora ("max_connections_per_hour"),
+            // i amb trànsit real (cada pàgina fa diverses crides a l'API) s'esgota de seguida.
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                \PDO::ATTR_PERSISTENT => env('DB_PERSISTENT', false),
             ]) : [],
         ],
 
@@ -79,8 +84,13 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // Connexions persistents: reaprofita la connexió TCP entre peticions PHP-FPM
+            // en lloc d'obrir-ne una de nova a cada request. Alguns hostings compartits
+            // (com Hostinger) limiten les connexions noves per hora ("max_connections_per_hour"),
+            // i amb trànsit real (cada pàgina fa diverses crides a l'API) s'esgota de seguida.
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                \PDO::ATTR_PERSISTENT => env('DB_PERSISTENT', false),
             ]) : [],
         ],
 

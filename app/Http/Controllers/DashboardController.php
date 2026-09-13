@@ -176,15 +176,17 @@ class DashboardController extends Controller
         }
 
         $fieldTypeByName = $assignment->template->fields->pluck('fieldType', 'name');
+        $fieldLabelByName = $assignment->template->fields->pluck('label', 'name');
+        $labelOf = fn (string $name) => $fieldLabelByName[$name] ?? $name;
 
-        $variableSummaries = collect($byField)->map(function ($entries, $field) use ($fieldTypeByName) {
+        $variableSummaries = collect($byField)->map(function ($entries, $field) use ($fieldTypeByName, $labelOf) {
             if (($fieldTypeByName[$field] ?? null) === 'BLOOD_PRESSURE') {
                 $systolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_sistolica'] ?? null) ? (float) $e['value']['tensio_sistolica'] : null)->filter(fn ($n) => $n !== null);
                 $diastolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_diastolica'] ?? null) ? (float) $e['value']['tensio_diastolica'] : null)->filter(fn ($n) => $n !== null);
                 $avg = fn ($nums) => round($nums->avg(), 1);
 
                 return [
-                    'field' => $field, 'type' => 'blood_pressure', 'count' => count($entries),
+                    'field' => $labelOf($field), 'type' => 'blood_pressure', 'count' => count($entries),
                     'avgSystolic' => $systolics->isNotEmpty() ? $avg($systolics) : null,
                     'avgDiastolic' => $diastolics->isNotEmpty() ? $avg($diastolics) : null,
                 ];
@@ -192,13 +194,13 @@ class DashboardController extends Controller
 
             $nums = collect($entries)->map(fn ($e) => is_numeric($e['value']) ? (float) $e['value'] : null)->filter(fn ($n) => $n !== null)->values();
             if ($nums->isEmpty()) {
-                return ['field' => $field, 'type' => 'text', 'count' => count($entries), 'lastValue' => end($entries)['value'] ?? null];
+                return ['field' => $labelOf($field), 'type' => 'text', 'count' => count($entries), 'lastValue' => end($entries)['value'] ?? null];
             }
             $first = $nums->first();
             $last = $nums->last();
 
             return [
-                'field' => $field, 'type' => 'number', 'count' => $nums->count(),
+                'field' => $labelOf($field), 'type' => 'number', 'count' => $nums->count(),
                 'avg' => round($nums->avg(), 1), 'min' => $nums->min(), 'max' => $nums->max(),
                 'first' => $first, 'last' => $last,
                 'trend' => $last > $first ? 'puja' : ($last < $first ? 'baixa' : 'estable'),
@@ -209,7 +211,7 @@ class DashboardController extends Controller
         // per a camps d'escala: un NUMBER (p. ex. pes) no és una escala 0-10.
         $incidencies = $records->filter(fn ($r) => ($fieldTypeByName[$r->fieldName] ?? null) === 'SCALE' && is_numeric($r->value))
             ->filter(fn ($r) => (float) $r->value >= 7)
-            ->map(fn ($r) => ['date' => Carbon::parse($r->recordDate)->toDateString(), 'field' => $r->fieldName, 'value' => $r->value])
+            ->map(fn ($r) => ['date' => Carbon::parse($r->recordDate)->toDateString(), 'field' => $labelOf($r->fieldName), 'value' => $r->value])
             ->values();
 
         $puntsARevisar = [];
