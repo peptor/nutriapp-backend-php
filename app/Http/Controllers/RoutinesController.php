@@ -370,7 +370,15 @@ class RoutinesController extends Controller
             return response()->json(['error' => 'Accés denegat'], 403);
         }
 
-        $assignment->update(['status' => $request->validated('status')]);
+        $status = $request->validated('status');
+        if ($status === 'COMPLETED' && ! $request->validated('evolutionRating')) {
+            return response()->json(['error' => 'Cal indicar com ha evolucionat el pacient per completar la rutina.'], 422);
+        }
+
+        $assignment->update([
+            'status' => $status,
+            'evolutionRating' => $status === 'COMPLETED' ? $request->validated('evolutionRating') : $assignment->evolutionRating,
+        ]);
         $assignment->load(['template:id,name,durationDays', 'patient.user:id,name,email']);
 
         return response()->json($assignment);

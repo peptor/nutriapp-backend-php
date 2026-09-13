@@ -16,6 +16,7 @@ class AssignmentStatusRequest extends FormRequest
     {
         return [
             'status' => ['required', Rule::in(['ACTIVE', 'COMPLETED', 'CANCELLED'])],
+            'evolutionRating' => ['nullable', Rule::in(['POSITIVE', 'STABLE', 'NEGATIVE'])],
         ];
     }
 }

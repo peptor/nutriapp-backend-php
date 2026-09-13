@@ -18,7 +18,7 @@ class RoutineAssignment extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['patientId', 'templateId', 'startDate', 'endDate', 'status', 'customNotes'];
+    protected $fillable = ['patientId', 'templateId', 'startDate', 'endDate', 'status', 'evolutionRating', 'customNotes'];
 
     protected function casts(): array
     {

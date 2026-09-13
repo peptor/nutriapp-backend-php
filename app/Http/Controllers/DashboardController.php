@@ -40,11 +40,29 @@ class DashboardController extends Controller
         $newActiveAssignments = RoutineAssignment::where('status', 'ACTIVE')->where('createdAt', '>=', $lastMonthCutoff)
             ->whereHas('patient', fn ($q) => $q->where('nutricionistaId', $nutricionistaId))->count();
 
+        // Pacients amb almenys una rutina activa ("en seguiment").
+        $patientsInFollowUp = Patient::where('nutricionistaId', $nutricionistaId)
+            ->whereHas('assignments', fn ($q) => $q->where('status', 'ACTIVE'))
+            ->count();
+        $patientsInFollowUpPercent = $patients > 0 ? (int) round(($patientsInFollowUp / $patients) * 100) : 0;
+
+        // % de rutines completades i valorades pel nutricionista que han anat bé, sobre
+        // el total de rutines completades que sí que es van poder valorar (prou dades).
+        $ratedAssignments = RoutineAssignment::whereNotNull('evolutionRating')
+            ->whereHas('patient', fn ($q) => $q->where('nutricionistaId', $nutricionistaId));
+        $ratedTotal = (clone $ratedAssignments)->count();
+        $positiveTotal = (clone $ratedAssignments)->where('evolutionRating', 'POSITIVE')->count();
+        $positiveEvolutionPercent = $ratedTotal > 0 ? (int) round(($positiveTotal / $ratedTotal) * 100) : null;
+
         return response()->json([
             'totalPatients' => $patients,
             'newPatientsLastMonth' => $newPatients,
             'activeRoutines' => $activeAssignments,
             'newActiveRoutinesLastMonth' => $newActiveAssignments,
+            'patientsInFollowUp' => $patientsInFollowUp,
+            'patientsInFollowUpPercent' => $patientsInFollowUpPercent,
+            'positiveEvolutionPercent' => $positiveEvolutionPercent,
+            'ratedAssignmentsTotal' => $ratedTotal,
         ]);
     }
 
@@ -179,33 +197,58 @@ class DashboardController extends Controller
         $fieldLabelByName = $assignment->template->fields->pluck('label', 'name');
         $labelOf = fn (string $name) => $fieldLabelByName[$name] ?? $name;
 
-        $variableSummaries = collect($byField)->map(function ($entries, $field) use ($fieldTypeByName, $labelOf) {
-            if (($fieldTypeByName[$field] ?? null) === 'BLOOD_PRESSURE') {
-                $systolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_sistolica'] ?? null) ? (float) $e['value']['tensio_sistolica'] : null)->filter(fn ($n) => $n !== null);
-                $diastolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_diastolica'] ?? null) ? (float) $e['value']['tensio_diastolica'] : null)->filter(fn ($n) => $n !== null);
-                $avg = fn ($nums) => round($nums->avg(), 1);
+        // El registre d'àpats (camp sintètic "food_log", valor un objecte per àpat) ja té
+        // la seva pròpia secció ("Detall d'àpats"); no té sentit resumir-lo com a variable.
+        $variableSummaries = collect($byField)
+            ->reject(fn ($entries, $field) => $field === 'food_log' || ($fieldTypeByName[$field] ?? null) === 'MEAL')
+            ->map(function ($entries, $field) use ($fieldTypeByName, $labelOf) {
+                $fieldType = $fieldTypeByName[$field] ?? null;
+
+                if ($fieldType === 'BLOOD_PRESSURE') {
+                    $systolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_sistolica'] ?? null) ? (float) $e['value']['tensio_sistolica'] : null)->filter(fn ($n) => $n !== null);
+                    $diastolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_diastolica'] ?? null) ? (float) $e['value']['tensio_diastolica'] : null)->filter(fn ($n) => $n !== null);
+                    $avg = fn ($nums) => round($nums->avg(), 1);
+
+                    return [
+                        'field' => $labelOf($field), 'type' => 'blood_pressure', 'count' => count($entries),
+                        'avgSystolic' => $systolics->isNotEmpty() ? $avg($systolics) : null,
+                        'avgDiastolic' => $diastolics->isNotEmpty() ? $avg($diastolics) : null,
+                    ];
+                }
+
+                if ($fieldType === 'BOOLEAN') {
+                    $bools = collect($entries)->map(fn ($e) => in_array($e['value'], [true, 1, '1', 'true'], true));
+                    $yes = $bools->filter(fn ($b) => $b)->count();
+                    $no = $bools->count() - $yes;
+                    $first = $bools->first();
+                    $last = $bools->last();
+
+                    return [
+                        'field' => $labelOf($field), 'type' => 'boolean', 'count' => $bools->count(),
+                        'majority' => $yes === $no ? 'Empat' : ($yes > $no ? 'Sí' : 'No'),
+                        'yesCount' => $yes, 'noCount' => $no,
+                        'trend' => $last === $first ? 'estable' : ($last ? 'puja' : 'baixa'),
+                    ];
+                }
+
+                // NUMBER / SCALE (o qualsevol altre camp amb valors numèrics).
+                $nums = collect($entries)->map(fn ($e) => is_numeric($e['value']) ? (float) $e['value'] : null)->filter(fn ($n) => $n !== null)->values();
+                if ($nums->isEmpty()) {
+                    // TEXT / SELECT (i altres tipus sense valors numèrics): només comptem i mostrem l'últim.
+                    $lastValue = end($entries)['value'] ?? null;
+
+                    return ['field' => $labelOf($field), 'type' => 'text', 'count' => count($entries), 'lastValue' => is_scalar($lastValue) ? $lastValue : null];
+                }
+                $first = $nums->first();
+                $last = $nums->last();
 
                 return [
-                    'field' => $labelOf($field), 'type' => 'blood_pressure', 'count' => count($entries),
-                    'avgSystolic' => $systolics->isNotEmpty() ? $avg($systolics) : null,
-                    'avgDiastolic' => $diastolics->isNotEmpty() ? $avg($diastolics) : null,
+                    'field' => $labelOf($field), 'type' => 'number', 'count' => $nums->count(),
+                    'avg' => round($nums->avg(), 1), 'min' => $nums->min(), 'max' => $nums->max(),
+                    'first' => $first, 'last' => $last,
+                    'trend' => $last > $first ? 'puja' : ($last < $first ? 'baixa' : 'estable'),
                 ];
-            }
-
-            $nums = collect($entries)->map(fn ($e) => is_numeric($e['value']) ? (float) $e['value'] : null)->filter(fn ($n) => $n !== null)->values();
-            if ($nums->isEmpty()) {
-                return ['field' => $labelOf($field), 'type' => 'text', 'count' => count($entries), 'lastValue' => end($entries)['value'] ?? null];
-            }
-            $first = $nums->first();
-            $last = $nums->last();
-
-            return [
-                'field' => $labelOf($field), 'type' => 'number', 'count' => $nums->count(),
-                'avg' => round($nums->avg(), 1), 'min' => $nums->min(), 'max' => $nums->max(),
-                'first' => $first, 'last' => $last,
-                'trend' => $last > $first ? 'puja' : ($last < $first ? 'baixa' : 'estable'),
-            ];
-        })->values();
+            })->values();
 
         // Incidències senzilles: valors alts (>= 7 en escales 0-10). Només té sentit
         // per a camps d'escala: un NUMBER (p. ex. pes) no és una escala 0-10.
