@@ -54,6 +54,10 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // URL del frontend (SPA React separada): cal per construir enllaços que apuntin
+    // a pantalles del frontend des del backend, com el de restabliment de contrasenya.
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

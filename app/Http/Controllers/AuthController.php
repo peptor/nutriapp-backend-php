@@ -3,14 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ChangePasswordRequest;
+use App\Http\Requests\ForgotPasswordRequest;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
+use App\Http\Requests\ResetPasswordRequest;
 use App\Http\Requests\SetPasswordRequest;
 use App\Http\Requests\UpdateOwnProfileRequest;
+use App\Mail\PasswordResetMail;
 use App\Models\Patient;
+use App\Models\PasswordResetToken;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -100,6 +106,57 @@ class AuthController extends Controller
             'user' => $this->publicUser($user),
             'token' => $this->issueToken($user),
         ]);
+    }
+
+    private const PASSWORD_RESET_EXPIRES_MINUTES = 10;
+
+    // Envia un enllaç de restabliment per email. Resposta genèrica sempre (encara que
+    // l'email no existeixi), per no revelar quins comptes existeixen al sistema.
+    public function forgotPassword(ForgotPasswordRequest $request)
+    {
+        $data = $request->validated();
+        $user = User::where('email', $data['email'])->whereNull('deletedAt')->first();
+
+        if ($user) {
+            PasswordResetToken::where('userId', $user->id)->whereNull('usedAt')->delete();
+
+            $rawToken = Str::random(64);
+            PasswordResetToken::create([
+                'userId' => $user->id,
+                'tokenHash' => hash('sha256', $rawToken),
+                'expiresAt' => now()->addMinutes(self::PASSWORD_RESET_EXPIRES_MINUTES),
+            ]);
+
+            $resetUrl = rtrim(config('app.frontend_url'), '/').'/reset-password?token='.$rawToken;
+
+            Mail::to($user->email)->send(new PasswordResetMail($user->name, $resetUrl, self::PASSWORD_RESET_EXPIRES_MINUTES));
+        }
+
+        return response()->json(['message' => "Si existeix un compte amb aquest correu, t'hem enviat un enllaç per restablir la contrasenya."]);
+    }
+
+    // Estableix una contrasenya nova a partir d'un enllaç de restabliment vàlid (no caducat, no usat).
+    public function resetPassword(ResetPasswordRequest $request)
+    {
+        $data = $request->validated();
+        $tokenHash = hash('sha256', $data['token']);
+
+        $resetToken = PasswordResetToken::where('tokenHash', $tokenHash)->whereNull('usedAt')->first();
+
+        if (! $resetToken || $resetToken->expiresAt->isPast()) {
+            return response()->json(['error' => "L'enllaç no és vàlid o ha caducat. Torna a demanar-ne un de nou."], 400);
+        }
+
+        $user = User::find($resetToken->userId);
+        if (! $user || $user->deletedAt) {
+            return response()->json(['error' => 'Usuari no trobat'], 404);
+        }
+
+        $user->update(['passwordHash' => Hash::make($data['newPassword'])]);
+        $resetToken->update(['usedAt' => now()]);
+        $user->tokens()->delete(); // revoca les sessions actives per seguretat
+
+        return response()->json(['message' => 'Contrasenya actualitzada correctament']);
     }
 
     public function me(Request $request)
