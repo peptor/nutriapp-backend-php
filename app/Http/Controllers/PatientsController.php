@@ -139,12 +139,17 @@ class PatientsController extends Controller
         $patient = Patient::with([
             'user:id,name,email,phone',
             'assignments.template',
-            'assignments.records' => fn ($q) => $q->orderBy('recordDate', 'desc')->limit(50),
+            'assignments.records' => fn ($q) => $q->orderBy('recordDate', 'desc'),
         ])->find($id);
 
         if (! $patient) {
             return response()->json(['error' => 'Pacient no trobat'], 404);
         }
+
+        // Limitem a 50 registres per assignació en PHP (no amb ->limit() a l'eager load): Eloquent
+        // implementaria el límit per relació amb ROW_NUMBER() OVER(...), que MariaDB (usat en local)
+        // no gestiona bé combinat amb aquesta subconsulta ("Mixing of GROUP columns...").
+        $patient->assignments->each(fn ($a) => $a->setRelation('records', $a->records->take(50)));
 
         $user = $request->user();
         $isOwnerNutricionista = $user->role === 'NUTRICIONISTA' && $patient->nutricionistaId === $user->id;

@@ -54,6 +54,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/assignments/{patientId}', [RoutinesController::class, 'assignmentsOfPatient'])->middleware('role:NUTRICIONISTA');
         Route::get('/my-assignments', [RoutinesController::class, 'myAssignments'])->middleware('role:PACIENT');
         Route::patch('/assignments/{id}/status', [RoutinesController::class, 'updateStatus'])->middleware('role:NUTRICIONISTA');
+        Route::delete('/assignments/{id}', [RoutinesController::class, 'destroyAssignment'])->middleware('role:NUTRICIONISTA');
     });
 
     // ——— Records ———

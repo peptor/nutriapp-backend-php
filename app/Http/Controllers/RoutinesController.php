@@ -301,9 +301,13 @@ class RoutinesController extends Controller
         }
 
         $assignments = RoutineAssignment::where('patientId', $patient->id)
-            ->with(['template.fields', 'records' => fn ($q) => $q->orderBy('recordDate', 'desc')->limit(100)])
+            ->with(['template.fields', 'records' => fn ($q) => $q->orderBy('recordDate', 'desc')])
             ->orderBy('startDate', 'desc')
             ->get();
+
+        // Limitem a 100 registres per assignació en PHP (no amb ->limit() a l'eager load): veure
+        // el comentari a PatientsController::show sobre la incompatibilitat amb MariaDB.
+        $assignments->each(fn ($a) => $a->setRelation('records', $a->records->take(100)));
 
         return response()->json($assignments);
     }
@@ -370,5 +374,25 @@ class RoutinesController extends Controller
         $assignment->load(['template:id,name,durationDays', 'patient.user:id,name,email']);
 
         return response()->json($assignment);
+    }
+
+    // Elimina una assignació de rutina. Només si no té cap registre de dades entrat
+    // (si en té, s'ha de completar/cancel·lar, no eliminar, per no perdre historial clínic).
+    public function destroyAssignment(Request $request, string $id)
+    {
+        $assignment = RoutineAssignment::with('patient')->find($id);
+        if (! $assignment) {
+            return response()->json(['error' => 'Assignació no trobada'], 404);
+        }
+        if ($assignment->patient->nutricionistaId !== $request->user()->id) {
+            return response()->json(['error' => 'Accés denegat'], 403);
+        }
+        if ($assignment->records()->exists()) {
+            return response()->json(['error' => 'No es pot eliminar una rutina amb registres de dades. Completa-la o cancel·la-la.'], 409);
+        }
+
+        $assignment->delete();
+
+        return response()->json(['message' => 'Rutina eliminada correctament']);
     }
 }
