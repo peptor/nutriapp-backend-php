@@ -71,6 +71,7 @@ class DashboardController extends Controller
     {
         $assignment = RoutineAssignment::with([
             'template.fields' => fn ($q) => $q->orderBy('orderIndex'),
+            'template.fields.fieldIcon',
             'patient.user:id,name,email',
             'patient.nutricionista:id,name',
             'patient.nutricionista.nutricionistaProfile',
@@ -163,6 +164,7 @@ class DashboardController extends Controller
     {
         $assignment = RoutineAssignment::with([
             'template.fields' => fn ($q) => $q->orderBy('orderIndex'),
+            'template.fields.fieldIcon',
             'patient.user:id,name,email,phone',
             'patient.nutricionista:id,name',
             'patient.nutricionista.nutricionistaProfile',

@@ -17,7 +17,7 @@ class RoutineField extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = null;
 
-    protected $fillable = ['templateId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex'];
+    protected $fillable = ['templateId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex', 'fieldIconId', 'goodDirection'];
 
     protected function casts(): array
     {
@@ -27,5 +27,10 @@ class RoutineField extends Model
     public function template(): BelongsTo
     {
         return $this->belongsTo(RoutineTemplate::class, 'templateId');
+    }
+
+    public function fieldIcon(): BelongsTo
+    {
+        return $this->belongsTo(FieldIcon::class, 'fieldIconId');
     }
 }

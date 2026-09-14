@@ -7,6 +7,7 @@ use App\Http\Requests\AssignRoutineRequest;
 use App\Http\Requests\CreateRoutineTemplateRequest;
 use App\Http\Requests\FieldLibraryItemRequest;
 use App\Http\Requests\UpdateRoutineTemplateRequest;
+use App\Models\FieldIcon;
 use App\Models\FieldLibraryItem;
 use App\Models\Food;
 use App\Models\LibraryRoutine;
@@ -27,6 +28,7 @@ class RoutinesController extends Controller
     public function library()
     {
         $routines = LibraryRoutine::with([
+            'icon',
             'fields' => fn ($q) => $q->orderBy('orderIndex'),
             'instructions' => fn ($q) => $q->orderBy('orderIndex'),
             'foods.food.category',
@@ -99,6 +101,7 @@ class RoutinesController extends Controller
                 'objective' => $library->objective,
                 'foodLogEnabled' => false,
                 'createdById' => $request->user()->id,
+                'iconId' => $library->iconId,
             ]);
 
             foreach ($library->fields as $field) {
@@ -161,6 +164,8 @@ class RoutinesController extends Controller
                 'foodLogEnabled' => $data['foodLogEnabled'] ?? false,
                 'isPublic' => $data['isPublic'] ?? false,
                 'createdById' => $request->user()->id,
+                // Rutina creada des de zero (no ve de la biblioteca): icona genèrica.
+                'iconId' => FieldIcon::where('key', 'lib-nutricionista')->value('id'),
             ]);
 
             foreach (($data['fields'] ?? []) as $idx => $f) {
@@ -173,6 +178,8 @@ class RoutinesController extends Controller
                     'required' => $f['required'] ?? true,
                     'options' => $f['options'] ?? null,
                     'orderIndex' => $f['orderIndex'] ?? $idx,
+                    'fieldIconId' => $f['fieldIconId'] ?? null,
+                    'goodDirection' => $f['goodDirection'] ?? null,
                 ]);
             }
             foreach (($data['foods'] ?? []) as $f) {
@@ -217,6 +224,8 @@ class RoutinesController extends Controller
                         'required' => $f['required'] ?? true,
                         'options' => $f['options'] ?? null,
                         'orderIndex' => $f['orderIndex'] ?? $idx,
+                        'fieldIconId' => $f['fieldIconId'] ?? null,
+                        'goodDirection' => $f['goodDirection'] ?? null,
                     ]);
                 }
             }

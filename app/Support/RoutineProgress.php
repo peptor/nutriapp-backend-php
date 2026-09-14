@@ -30,6 +30,9 @@ class RoutineProgress
         return [
             'adherencePercent' => (int) round(($daysWithRecords / $elapsedDays) * 100),
             'completedPercent' => (int) round(($daysWithRecords / $totalDays) * 100),
+            'daysWithRecords' => $daysWithRecords,
+            'elapsedDays' => $elapsedDays,
+            'totalDays' => $totalDays,
         ];
     }
 }

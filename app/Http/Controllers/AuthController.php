@@ -13,6 +13,7 @@ use App\Mail\PasswordResetMail;
 use App\Models\Patient;
 use App\Models\PasswordResetToken;
 use App\Models\User;
+use App\Support\UrlHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -22,12 +23,19 @@ class AuthController extends Controller
 {
     private function publicUser(User $user): array
     {
+        $avatarUrl = match ($user->role) {
+            'NUTRICIONISTA' => $user->nutricionistaProfile?->logoUrl,
+            'PACIENT' => Patient::where('userId', $user->id)->whereNotNull('photoUrl')->value('photoUrl'),
+            default => null,
+        };
+
         return [
             'id' => $user->id,
             'email' => $user->email,
             'name' => $user->name,
             'role' => $user->role,
             'phone' => $user->phone,
+            'avatarUrl' => UrlHelper::toAbsoluteUrl($avatarUrl),
         ];
     }
 

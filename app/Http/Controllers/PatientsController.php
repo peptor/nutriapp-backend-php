@@ -36,7 +36,7 @@ class PatientsController extends Controller
             ->with([
                 'user:id,name,email,phone',
                 'assignments' => fn ($q) => $q->where('status', 'ACTIVE')
-                    ->with(['template:id,name,durationDays', 'records:id,assignmentId,recordDate']),
+                    ->with(['template:id,name,durationDays,iconId', 'template.icon', 'records:id,assignmentId,recordDate']),
             ])
             ->orderBy('createdAt', 'desc')
             ->get();

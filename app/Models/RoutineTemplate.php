@@ -18,7 +18,7 @@ class RoutineTemplate extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['name', 'description', 'durationDays', 'objective', 'isPublic', 'createdById', 'foodLogEnabled'];
+    protected $fillable = ['name', 'description', 'durationDays', 'objective', 'isPublic', 'createdById', 'foodLogEnabled', 'iconId'];
 
     protected function casts(): array
     {
@@ -34,6 +34,11 @@ class RoutineTemplate extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'createdById');
+    }
+
+    public function icon(): BelongsTo
+    {
+        return $this->belongsTo(FieldIcon::class, 'iconId');
     }
 
     public function fields(): HasMany
