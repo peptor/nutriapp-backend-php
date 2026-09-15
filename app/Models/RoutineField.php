@@ -10,14 +10,14 @@ class RoutineField extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'routine_fields';
+    protected $table = 'mst_routine_fields';
 
     public static $snakeAttributes = false;
 
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = null;
 
-    protected $fillable = ['templateId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex', 'fieldIconId', 'goodDirection'];
+    protected $fillable = ['templateId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex', 'fieldIconId', 'goodDirection', 'unit'];
 
     protected function casts(): array
     {

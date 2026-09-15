@@ -30,6 +30,8 @@ class CreateRoutineTemplateRequest extends FormRequest
             'fields.*.required' => ['sometimes', 'boolean'],
             'fields.*.options' => ['nullable'],
             'fields.*.orderIndex' => ['sometimes', 'integer', 'min:0'],
+            'fields.*.goodDirection' => ['nullable', Rule::in(['LOW', 'HIGH'])],
+            'fields.*.unit' => ['nullable', 'string', 'max:20'],
             'foods' => ['sometimes', 'array'],
             'foods.*.foodId' => ['required', 'uuid'],
             'foods.*.use' => ['required', Rule::in(['RECOMMENDED', 'LIMIT', 'AVOID'])],

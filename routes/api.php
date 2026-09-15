@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FoodLibraryController;
 use App\Http\Controllers\PatientsController;
 use App\Http\Controllers\RecordsController;
 use App\Http\Controllers\RoutinesController;
@@ -57,6 +58,23 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/my-assignments', [RoutinesController::class, 'myAssignments'])->middleware('role:PACIENT');
         Route::patch('/assignments/{id}/status', [RoutinesController::class, 'updateStatus'])->middleware('role:NUTRICIONISTA');
         Route::delete('/assignments/{id}', [RoutinesController::class, 'destroyAssignment'])->middleware('role:NUTRICIONISTA');
+    });
+
+    // ——— Biblioteca d'aliments: favorits i recents del picker (pacient, o el seu nutricionista) ———
+    Route::prefix('food-library')->middleware('role:NUTRICIONISTA,PACIENT')->group(function () {
+        Route::get('/favorites', [FoodLibraryController::class, 'favorites']);
+        Route::post('/favorites', [FoodLibraryController::class, 'addFavorite']);
+        Route::delete('/favorites/{foodId}', [FoodLibraryController::class, 'removeFavorite']);
+        Route::get('/recents', [FoodLibraryController::class, 'recents']);
+        Route::post('/selections', [FoodLibraryController::class, 'recordSelection']);
+    });
+
+    // ——— Cerca i consulta d'aliments + gestió d'aliments personalitzats (nutricionista) ———
+    Route::prefix('food-library')->middleware('role:NUTRICIONISTA')->group(function () {
+        Route::get('/foods', [FoodLibraryController::class, 'index']);
+        Route::post('/foods', [FoodLibraryController::class, 'storeFood']);
+        Route::put('/foods/{id}', [FoodLibraryController::class, 'updateFood']);
+        Route::delete('/foods/{id}', [FoodLibraryController::class, 'destroyFood']);
     });
 
     // ——— Records ———

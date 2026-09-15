@@ -21,6 +21,8 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/storage/app/ciqual
+/storage/app/ciqual_curated_foods.json
 /vendor
 _ide_helper.php
 Homestead.json

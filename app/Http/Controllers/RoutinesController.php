@@ -17,6 +17,7 @@ use App\Models\RoutineField;
 use App\Models\RoutineInstruction;
 use App\Models\RoutineTemplate;
 use App\Models\RoutineTemplateFood;
+use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -39,13 +40,18 @@ class RoutinesController extends Controller
 
     // Catàleg d'aliments: el nutricionista el consulta per configurar rutines, i el
     // pacient (o el nutricionista en nom seu) per triar què ha menjat al registre d'àpats.
-    public function foods()
+    // El pacient només veu la biblioteca pública; el nutricionista també hi veu els seus
+    // propis aliments personalitzats (mai els d'altres nutricionistes).
+    public function foods(Request $request)
     {
-        $foods = Food::with('category')
-            ->join('food_categories', 'foods.categoryId', '=', 'food_categories.id')
-            ->orderBy('food_categories.name')
-            ->orderBy('foods.name')
-            ->select('foods.*')
+        $nutricionistaId = $request->user()->role === 'NUTRICIONISTA' ? $request->user()->id : null;
+
+        $foods = Food::with(['category', 'subcategory.translation', 'allergenLinks.allergen.translation'])
+            ->visibleTo($nutricionistaId)
+            ->join('mst_food_categories', 'mst_foods.categoryId', '=', 'mst_food_categories.id')
+            ->orderBy('mst_food_categories.name')
+            ->orderBy('mst_foods.name')
+            ->select('mst_foods.*')
             ->get();
 
         return response()->json($foods);
@@ -180,6 +186,7 @@ class RoutinesController extends Controller
                     'orderIndex' => $f['orderIndex'] ?? $idx,
                     'fieldIconId' => $f['fieldIconId'] ?? null,
                     'goodDirection' => $f['goodDirection'] ?? null,
+                    'unit' => $f['unit'] ?? null,
                 ]);
             }
             foreach (($data['foods'] ?? []) as $f) {
@@ -226,6 +233,7 @@ class RoutinesController extends Controller
                         'orderIndex' => $f['orderIndex'] ?? $idx,
                         'fieldIconId' => $f['fieldIconId'] ?? null,
                         'goodDirection' => $f['goodDirection'] ?? null,
+                        'unit' => $f['unit'] ?? null,
                     ]);
                 }
             }
@@ -332,6 +340,8 @@ class RoutinesController extends Controller
                 'patient.nutricionista:id,name',
                 'patient.nutricionista.nutricionistaProfile:userId,companyName,logoUrl',
                 'template.fields' => fn ($q) => $q->orderBy('orderIndex'),
+                'template.fields.fieldIcon',
+                'template.icon',
                 'template.foods.food.category',
                 'records:id,assignmentId,recordDate,fieldName',
             ])
@@ -349,8 +359,6 @@ class RoutinesController extends Controller
                 $computedStatus = $today->lt($start) ? 'PREPARADA' : ($today->gt($end) ? 'ACABADA' : 'ACTIVA');
             }
 
-            $daysWithRecords = $a->records->map(fn ($r) => Carbon::parse($r->recordDate)->toDateString())->unique()->count();
-
             $array = $a->toArray();
             $array['nutricionistaId'] = $a->patient->nutricionistaId;
             $array['nutricionista'] = [
@@ -360,7 +368,7 @@ class RoutinesController extends Controller
                 'logoUrl' => UrlHelper::toAbsoluteUrl($a->patient->nutricionista->nutricionistaProfile?->logoUrl),
             ];
             $array['computedStatus'] = $computedStatus;
-            $array['daysWithRecords'] = $daysWithRecords;
+            $array = array_merge($array, RoutineProgress::of($a->startDate, $a->endDate, $a->records->pluck('recordDate')));
 
             return $array;
         });
