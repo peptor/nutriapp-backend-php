@@ -10,7 +10,7 @@ class LibraryRoutineInstruction extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'library_routine_instructions';
+    protected $table = 'mst_library_routine_instructions';
 
     public static $snakeAttributes = false;
 

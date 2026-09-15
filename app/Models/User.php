@@ -12,7 +12,7 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasUuidPrimaryKey;
 
-    protected $table = 'users';
+    protected $table = 'sys_users';
 
     // Totes les columnes i relacions són camelCase (com Prisma); evitem que Eloquent
     // les converteixi a snake_case en serialitzar a JSON.

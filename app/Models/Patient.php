@@ -11,7 +11,7 @@ class Patient extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'patients';
+    protected $table = 'sys_patients';
 
     public static $snakeAttributes = false;
 

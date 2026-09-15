@@ -11,7 +11,7 @@ class LibraryRoutine extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'library_routines';
+    protected $table = 'mst_library_routines';
 
     public static $snakeAttributes = false;
 

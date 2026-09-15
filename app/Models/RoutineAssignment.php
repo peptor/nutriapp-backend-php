@@ -11,7 +11,7 @@ class RoutineAssignment extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'routine_assignments';
+    protected $table = 'reg_routine_assignments';
 
     public static $snakeAttributes = false;
 

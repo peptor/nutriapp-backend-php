@@ -10,7 +10,7 @@ class LibraryRoutineField extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'library_routine_fields';
+    protected $table = 'mst_library_routine_fields';
 
     public static $snakeAttributes = false;
 

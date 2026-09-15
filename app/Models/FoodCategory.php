@@ -10,7 +10,7 @@ class FoodCategory extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'food_categories';
+    protected $table = 'mst_food_categories';
 
     public static $snakeAttributes = false;
 

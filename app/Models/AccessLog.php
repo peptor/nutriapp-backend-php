@@ -10,7 +10,7 @@ class AccessLog extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'access_logs';
+    protected $table = 'reg_access_logs';
 
     public static $snakeAttributes = false;
 

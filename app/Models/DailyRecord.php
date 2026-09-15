@@ -10,7 +10,7 @@ class DailyRecord extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'daily_records';
+    protected $table = 'reg_daily_records';
 
     public static $snakeAttributes = false;
 

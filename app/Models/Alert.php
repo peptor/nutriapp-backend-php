@@ -9,7 +9,7 @@ class Alert extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'alerts';
+    protected $table = 'reg_alerts';
 
     public static $snakeAttributes = false;
 

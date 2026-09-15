@@ -10,7 +10,7 @@ class FieldLibraryItem extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'field_library_items';
+    protected $table = 'mst_field_library_items';
 
     public static $snakeAttributes = false;
 

@@ -10,7 +10,7 @@ class NutricionistaProfile extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'nutricionista_profiles';
+    protected $table = 'sys_nutricionista_profiles';
 
     public static $snakeAttributes = false;
 

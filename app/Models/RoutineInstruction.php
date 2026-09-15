@@ -10,7 +10,7 @@ class RoutineInstruction extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'routine_instructions';
+    protected $table = 'mst_routine_instructions';
 
     public static $snakeAttributes = false;
 

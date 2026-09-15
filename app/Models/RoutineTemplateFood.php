@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class RoutineTemplateFood extends Model
 {
-    protected $table = 'routine_template_foods';
+    protected $table = 'mst_routine_template_foods';
 
     public static $snakeAttributes = false;
 

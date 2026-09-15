@@ -11,7 +11,7 @@ class RoutineTemplate extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'routine_templates';
+    protected $table = 'mst_routine_templates';
 
     public static $snakeAttributes = false;
 
