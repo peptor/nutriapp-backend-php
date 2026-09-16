@@ -105,6 +105,8 @@ class RoutinesController extends Controller
                 'description' => $library->description,
                 'durationDays' => $library->durationDays,
                 'objective' => $library->objective,
+                'category' => $library->category,
+                'tags' => $library->tags,
                 'foodLogEnabled' => false,
                 'createdById' => $request->user()->id,
                 'iconId' => $library->iconId,
@@ -145,11 +147,18 @@ class RoutinesController extends Controller
         return response()->json($template, 201);
     }
 
-    // List templates (own + public)
+    // List templates (own + public). patientsCount i recordsCount alimenten la targeta de
+    // "Les meves rutines" (pacients assignats i volum de dades registrades amb aquesta
+    // plantilla) — es calculen aquí perquè depenen de reg_routine_assignments/reg_daily_records.
     public function templatesIndex(Request $request)
     {
         $templates = RoutineTemplate::where(fn ($q) => $q->where('createdById', $request->user()->id)->orWhere('isPublic', true))
-            ->with(['fields' => fn ($q) => $q->orderBy('orderIndex'), 'foods.food.category'])
+            ->with(['icon', 'fields' => fn ($q) => $q->orderBy('orderIndex'), 'foods.food.category'])
+            ->withCount([
+                'assignments as patientsCount' => fn ($q) => $q->select(DB::raw('count(distinct patientId)')),
+                'assignments as recordsCount' => fn ($q) => $q->join('reg_daily_records', 'reg_daily_records.assignmentId', '=', 'reg_routine_assignments.id')
+                    ->select(DB::raw('count(reg_daily_records.id)')),
+            ])
             ->orderBy('createdAt', 'desc')
             ->get();
 
@@ -167,6 +176,8 @@ class RoutinesController extends Controller
                 'description' => $data['description'] ?? null,
                 'durationDays' => (int) $data['durationDays'],
                 'objective' => $data['objective'] ?? null,
+                'category' => $data['category'] ?? null,
+                'tags' => $data['tags'] ?? null,
                 'foodLogEnabled' => $data['foodLogEnabled'] ?? false,
                 'isPublic' => $data['isPublic'] ?? false,
                 'createdById' => $request->user()->id,
@@ -217,7 +228,7 @@ class RoutinesController extends Controller
         }
 
         $template = DB::transaction(function () use ($data, $existing) {
-            $existing->update(array_intersect_key($data, array_flip(['name', 'description', 'durationDays', 'objective', 'foodLogEnabled', 'isPublic'])));
+            $existing->update(array_intersect_key($data, array_flip(['name', 'description', 'durationDays', 'objective', 'category', 'tags', 'foodLogEnabled', 'isPublic'])));
 
             if (array_key_exists('fields', $data)) {
                 RoutineField::where('templateId', $existing->id)->delete();

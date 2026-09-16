@@ -19,6 +19,8 @@ class UpdateRoutineTemplateRequest extends FormRequest
             'description' => ['nullable', 'string', 'max:2000'],
             'durationDays' => ['sometimes', 'integer', 'min:1', 'max:365'],
             'objective' => ['nullable', 'string', 'max:500'],
+            'category' => ['nullable', 'string', 'max:60'],
+            'tags' => ['nullable', 'string', 'max:255'],
             'isPublic' => ['sometimes', 'boolean'],
             'foodLogEnabled' => ['sometimes', 'boolean'],
             'fields' => ['sometimes', 'array'],

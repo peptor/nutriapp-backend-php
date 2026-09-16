@@ -24,11 +24,13 @@ class Food extends Model
     protected $fillable = [
         'name', 'slug', 'description', 'imageUrl', 'categoryId', 'subcategoryId', 'ciqualCode',
         'standardGrams', 'servingDescription', 'calories',
-        'proteinGrams', 'fatGrams', 'carbsGrams', 'fiberGrams', 'sugarsGrams',
+        'proteinGrams', 'fatGrams', 'saturatedFatGrams', 'monounsaturatedFatGrams', 'polyunsaturatedFatGrams',
+        'carbsGrams', 'sugarsGrams', 'starchGrams', 'fiberGrams',
         'sodiumMg', 'saltGrams', 'calciumMg', 'magnesiumMg', 'phosphorusMg', 'potassiumMg', 'zincMg', 'ironMg',
+        'copperMg', 'manganeseMg', 'seleniumMcg',
         'vitaminAMcg', 'vitaminBMcg', 'vitaminDMcg', 'vitaminEMg', 'vitaminKMcg', 'vitaminCMg',
         'vitaminB1Mg', 'vitaminB2Mg', 'vitaminB3Mg', 'vitaminB5Mg', 'vitaminB6Mg', 'vitaminB9Mcg', 'vitaminB12Mcg',
-        'nutricionistaId', 'supersededByFoodId',
+        'nutricionistaId', 'supersededByFoodId', 'actiu', 'origenFont', 'observacions', 'etiquetes',
     ];
 
     protected function casts(): array
@@ -38,9 +40,13 @@ class Food extends Model
             'calories' => 'float',
             'proteinGrams' => 'float',
             'fatGrams' => 'float',
+            'saturatedFatGrams' => 'float',
+            'monounsaturatedFatGrams' => 'float',
+            'polyunsaturatedFatGrams' => 'float',
             'carbsGrams' => 'float',
             'fiberGrams' => 'float',
             'sugarsGrams' => 'float',
+            'starchGrams' => 'float',
             'sodiumMg' => 'float',
             'saltGrams' => 'float',
             'calciumMg' => 'float',
@@ -48,7 +54,11 @@ class Food extends Model
             'phosphorusMg' => 'float',
             'potassiumMg' => 'float',
             'zincMg' => 'float',
+            'copperMg' => 'float',
+            'manganeseMg' => 'float',
+            'seleniumMcg' => 'float',
             'ironMg' => 'float',
+            'actiu' => 'boolean',
             'vitaminAMcg' => 'float',
             'vitaminBMcg' => 'float',
             'vitaminDMcg' => 'float',
@@ -148,14 +158,17 @@ class Food extends Model
     // Biblioteca pública (nutricionistaId NULL) +, si es dona un nutricionista, els seus
     // aliments personalitzats. Sempre exclou versions substituïdes (ja no es poden triar
     // de nou, però les files es conserven perquè els registres antics hi continuen apuntant).
-    public function scopeVisibleTo(Builder $query, ?string $nutricionistaId): Builder
+    // $onlyActive=true (per defecte) amaga els aliments personalitzats marcats "Inactiu" —
+    // pensat per als selectors (registrar àpats), no per a la pàgina de gestió del propi
+    // nutricionista, que ha de poder veure'ls i reactivar-los.
+    public function scopeVisibleTo(Builder $query, ?string $nutricionistaId, bool $onlyActive = true): Builder
     {
         return $query->whereNull('mst_foods.supersededByFoodId')->where(function (Builder $q) use ($nutricionistaId) {
             $q->whereNull('mst_foods.nutricionistaId');
             if ($nutricionistaId) {
                 $q->orWhere('mst_foods.nutricionistaId', $nutricionistaId);
             }
-        });
+        })->when($onlyActive, fn (Builder $q) => $q->where('mst_foods.actiu', true));
     }
 
     // Un aliment personalitzat només es pot eliminar (i s'edita amb versionat en lloc

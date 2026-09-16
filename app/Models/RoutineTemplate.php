@@ -18,7 +18,7 @@ class RoutineTemplate extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['name', 'description', 'durationDays', 'objective', 'isPublic', 'createdById', 'foodLogEnabled', 'iconId'];
+    protected $fillable = ['name', 'description', 'durationDays', 'objective', 'category', 'tags', 'isPublic', 'createdById', 'foodLogEnabled', 'iconId'];
 
     protected function casts(): array
     {

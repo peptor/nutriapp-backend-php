@@ -18,7 +18,7 @@ class LibraryRoutine extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = null;
 
-    protected $fillable = ['slug', 'name', 'description', 'objective', 'durationDays', 'caution', 'sourceName', 'sourceUrl', 'iconId'];
+    protected $fillable = ['slug', 'name', 'description', 'objective', 'category', 'tags', 'durationDays', 'caution', 'sourceName', 'sourceUrl', 'iconId'];
 
     protected function casts(): array
     {
