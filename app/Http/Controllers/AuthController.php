@@ -36,6 +36,7 @@ class AuthController extends Controller
             'role' => $user->role,
             'phone' => $user->phone,
             'avatarUrl' => UrlHelper::toAbsoluteUrl($avatarUrl),
+            'brandingTheme' => $user->role === 'NUTRICIONISTA' ? ($user->nutricionistaProfile?->brandingTheme ?? 'classic') : 'classic',
         ];
     }
 

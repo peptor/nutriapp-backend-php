@@ -73,6 +73,19 @@ class BusinessController extends Controller
         ]);
     }
 
+    // Tema visual (font + logos) que veu el nutricionista: 'classic' o 'v1'.
+    public function updateTheme(Request $request)
+    {
+        $data = $request->validate(['theme' => 'required|in:classic,v1']);
+
+        $profile = NutricionistaProfile::updateOrCreate(
+            ['userId' => $request->user()->id],
+            ['brandingTheme' => $data['theme']],
+        );
+
+        return response()->json(['brandingTheme' => $profile->brandingTheme]);
+    }
+
     // Elimina només el logo, mantenint la resta de dades de l'empresa
     public function deleteLogo(Request $request)
     {

@@ -96,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/me', [BusinessController::class, 'show'])->middleware('role:NUTRICIONISTA');
         Route::put('/me', [BusinessController::class, 'update'])->middleware('role:NUTRICIONISTA');
         Route::delete('/me/logo', [BusinessController::class, 'deleteLogo'])->middleware('role:NUTRICIONISTA');
+        Route::put('/theme', [BusinessController::class, 'updateTheme'])->middleware('role:NUTRICIONISTA');
         Route::get('/my-nutricionistes', [BusinessController::class, 'myNutricionistes'])->middleware('role:PACIENT');
     });
 

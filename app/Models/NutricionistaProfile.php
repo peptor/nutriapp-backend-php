@@ -17,7 +17,7 @@ class NutricionistaProfile extends Model
     const CREATED_AT = null;
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['userId', 'companyName', 'taxId', 'address', 'postalCode', 'city', 'phone', 'logoUrl'];
+    protected $fillable = ['userId', 'companyName', 'taxId', 'address', 'postalCode', 'city', 'phone', 'logoUrl', 'brandingTheme'];
 
     protected function casts(): array
     {
