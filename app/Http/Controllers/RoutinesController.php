@@ -149,14 +149,25 @@ class RoutinesController extends Controller
 
     // List templates (own + public). patientsCount i recordsCount alimenten la targeta de
     // "Les meves rutines" (pacients assignats i volum de dades registrades amb aquesta
-    // plantilla) — es calculen aquí perquè depenen de reg_routine_assignments/reg_daily_records.
+    // plantilla). Una plantilla pública la pot fer servir qualsevol nutricionista amb els
+    // seus propis pacients, així que aquí es filtren les assignacions per sys_patients.nutricionistaId
+    // = l'usuari actual — si no, un nutricionista veuria comptats pacients d'altres nutricionistes
+    // que també fan servir la mateixa plantilla pública.
     public function templatesIndex(Request $request)
     {
-        $templates = RoutineTemplate::where(fn ($q) => $q->where('createdById', $request->user()->id)->orWhere('isPublic', true))
+        $nutricionistaId = $request->user()->id;
+
+        $templates = RoutineTemplate::where(fn ($q) => $q->where('createdById', $nutricionistaId)->orWhere('isPublic', true))
             ->with(['icon', 'fields' => fn ($q) => $q->orderBy('orderIndex'), 'foods.food.category'])
             ->withCount([
-                'assignments as patientsCount' => fn ($q) => $q->select(DB::raw('count(distinct patientId)')),
-                'assignments as recordsCount' => fn ($q) => $q->join('reg_daily_records', 'reg_daily_records.assignmentId', '=', 'reg_routine_assignments.id')
+                'assignments as patientsCount' => fn ($q) => $q
+                    ->join('sys_patients', 'sys_patients.id', '=', 'reg_routine_assignments.patientId')
+                    ->where('sys_patients.nutricionistaId', $nutricionistaId)
+                    ->select(DB::raw('count(distinct reg_routine_assignments.patientId)')),
+                'assignments as recordsCount' => fn ($q) => $q
+                    ->join('sys_patients', 'sys_patients.id', '=', 'reg_routine_assignments.patientId')
+                    ->where('sys_patients.nutricionistaId', $nutricionistaId)
+                    ->join('reg_daily_records', 'reg_daily_records.assignmentId', '=', 'reg_routine_assignments.id')
                     ->select(DB::raw('count(reg_daily_records.id)')),
             ])
             ->orderBy('createdAt', 'desc')
