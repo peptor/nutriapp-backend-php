@@ -45,6 +45,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('routines')->group(function () {
         Route::get('/library', [RoutinesController::class, 'library'])->middleware('role:NUTRICIONISTA');
         Route::get('/foods', [RoutinesController::class, 'foods'])->middleware('role:NUTRICIONISTA,PACIENT');
+        Route::get('/food-categories', [RoutinesController::class, 'foodCategories'])->middleware('role:NUTRICIONISTA,PACIENT');
         Route::get('/field-library', [RoutinesController::class, 'fieldLibraryIndex'])->middleware('role:NUTRICIONISTA');
         Route::post('/field-library', [RoutinesController::class, 'fieldLibraryStore'])->middleware('role:NUTRICIONISTA');
         Route::delete('/field-library/{id}', [RoutinesController::class, 'fieldLibraryDestroy'])->middleware('role:NUTRICIONISTA');

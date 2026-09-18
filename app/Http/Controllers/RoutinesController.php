@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateRoutineTemplateRequest;
 use App\Models\FieldIcon;
 use App\Models\FieldLibraryItem;
 use App\Models\Food;
+use App\Models\FoodCategory;
 use App\Models\LibraryRoutine;
 use App\Models\Patient;
 use App\Models\RoutineAssignment;
@@ -19,6 +20,7 @@ use App\Models\RoutineTemplate;
 use App\Models\RoutineTemplateFood;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -42,19 +44,76 @@ class RoutinesController extends Controller
     // pacient (o el nutricionista en nom seu) per triar què ha menjat al registre d'àpats.
     // El pacient només veu la biblioteca pública; el nutricionista també hi veu els seus
     // propis aliments personalitzats (mai els d'altres nutricionistes).
+    //
+    // Tres modes, perquè el catàleg (uns 700 aliments i creixent) no es carregui sencer
+    // arreu on es fa servir:
+    //  - ?ids=a,b,c   -> exactament aquestes files (per resoldre aliments ja registrats a
+    //                    un diari sense haver de descarregar tot el catàleg).
+    //  - ?all=1       -> tot el catàleg sense paginar (el formulari de rutines el necessita
+    //                    sencer per construir el desplegable agrupat per categoria).
+    //  - per defecte  -> paginat (search/categoryId/page/perPage), per al selector d'aliments
+    //                    amb scroll infinit.
     public function foods(Request $request)
     {
         $nutricionistaId = $request->user()->role === 'NUTRICIONISTA' ? $request->user()->id : null;
 
-        $foods = Food::with(['category', 'subcategory.translation', 'allergenLinks.allergen.translation'])
-            ->visibleTo($nutricionistaId)
-            ->join('mst_food_categories', 'mst_foods.categoryId', '=', 'mst_food_categories.id')
+        $base = Food::with(['category', 'subcategory.translation', 'allergenLinks.allergen.translation'])
+            ->visibleTo($nutricionistaId);
+
+        if ($request->filled('ids')) {
+            $ids = array_filter(explode(',', (string) $request->query('ids')));
+
+            return response()->json($base->whereIn('mst_foods.id', $ids)->orderBy('mst_foods.name')->get());
+        }
+
+        if ($request->boolean('all')) {
+            $foods = $base->join('mst_food_categories', 'mst_foods.categoryId', '=', 'mst_food_categories.id')
+                ->orderBy('mst_food_categories.name')
+                ->orderBy('mst_foods.name')
+                ->select('mst_foods.*')
+                ->get();
+
+            return response()->json($foods);
+        }
+
+        return response()->json($this->paginateFoods($request, $base));
+    }
+
+    // Categories de la biblioteca d'aliments (fixes, ~9 files): es carreguen senceres per
+    // separat perquè els filtres de categoria puguin mostrar sempre totes les opcions, encara
+    // que la llista d'aliments visible en un moment donat només mostri unes poques.
+    public function foodCategories()
+    {
+        return response()->json(FoodCategory::orderBy('name')->get(['id', 'name']));
+    }
+
+    // Aplica cerca per nom, filtre de categoria i paginació per pàgines a una query
+    // d'aliments ja filtrada per visibilitat; retorna ['data' => [...], 'hasMore' => bool].
+    // Compartit entre el selector d'aliments (FoodPickerModal) i la pàgina de biblioteca
+    // del nutricionista, perquè totes dues facin scroll infinit amb la mateixa lògica.
+    private function paginateFoods(Request $request, Builder $query): array
+    {
+        $perPage = max(1, min(50, (int) $request->query('perPage', 15)));
+        $page = max(1, (int) $request->query('page', 1));
+
+        if ($request->filled('search')) {
+            $search = trim((string) $request->query('search'));
+            $query->where('mst_foods.name', 'like', '%'.$search.'%');
+        }
+        if ($request->filled('categoryId')) {
+            $query->where('mst_foods.categoryId', $request->query('categoryId'));
+        }
+
+        $rows = $query->join('mst_food_categories', 'mst_foods.categoryId', '=', 'mst_food_categories.id')
             ->orderBy('mst_food_categories.name')
             ->orderBy('mst_foods.name')
             ->select('mst_foods.*')
+            ->forPage($page, $perPage + 1)
             ->get();
 
-        return response()->json($foods);
+        $hasMore = $rows->count() > $perPage;
+
+        return ['data' => $rows->take($perPage)->values(), 'hasMore' => $hasMore];
     }
 
     // Biblioteca de camps reutilitzables: globals (createdById null) + els propis del nutricionista.

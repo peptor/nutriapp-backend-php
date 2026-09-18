@@ -129,18 +129,34 @@ class FoodLibraryController extends Controller
 
     // Biblioteca pública + els aliments personalitzats del propi nutricionista (actius o
     // no: aquí es gestionen, així que també ha de poder veure i reactivar els inactius),
-    // per a la pàgina de cerca i consulta (només nutricionista).
+    // per a la pàgina de cerca i consulta (només nutricionista). Paginat (search/categoryId/
+    // page/perPage) perquè el catàleg (~700 aliments i creixent) no es carregui sencer.
     public function index(Request $request)
     {
-        $foods = Food::with(['category', 'subcategory.translation', 'allergenLinks.allergen.translation'])
-            ->visibleTo($request->user()->id, onlyActive: false)
-            ->join('mst_food_categories', 'mst_foods.categoryId', '=', 'mst_food_categories.id')
+        $perPage = max(1, min(50, (int) $request->query('perPage', 15)));
+        $page = max(1, (int) $request->query('page', 1));
+
+        $query = Food::with(['category', 'subcategory.translation', 'allergenLinks.allergen.translation'])
+            ->visibleTo($request->user()->id, onlyActive: false);
+
+        if ($request->filled('search')) {
+            $query->where('mst_foods.name', 'like', '%'.trim((string) $request->query('search')).'%');
+        }
+        if ($request->filled('categoryId')) {
+            $query->where('mst_foods.categoryId', $request->query('categoryId'));
+        }
+
+        $rows = $query->join('mst_food_categories', 'mst_foods.categoryId', '=', 'mst_food_categories.id')
             ->orderBy('mst_food_categories.name')
             ->orderBy('mst_foods.name')
             ->select('mst_foods.*')
+            ->forPage($page, $perPage + 1)
             ->get();
 
-        return response()->json($foods);
+        return response()->json([
+            'data' => $rows->take($perPage)->values(),
+            'hasMore' => $rows->count() > $perPage,
+        ]);
     }
 
     private const ALLOWED_IMAGE_MIME = [
