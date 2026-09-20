@@ -26,7 +26,7 @@ class FoodsWithoutIcon extends Command
             ->get(['id', 'name', 'slug', 'calories', 'categoryId']);
 
         foreach ($foods as $food) {
-            $this->line("{$food->id}\t{$food->name}\t{$food->slug}\t{$food->calories}\t{$food->categoryId}");
+            $this->line("{$food->id}|{$food->name}|{$food->slug}|{$food->calories}|{$food->categoryId}");
         }
 
         $this->info("Total mostrat: {$foods->count()} (límit {$limit})");

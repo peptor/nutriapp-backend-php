@@ -7,6 +7,7 @@ use App\Http\Requests\UpdatePatientRequest;
 use App\Models\Patient;
 use App\Models\User;
 use App\Support\AccessLogger;
+use App\Support\AssignmentTrend;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
@@ -29,24 +30,42 @@ class PatientsController extends Controller
         Storage::disk('public')->delete($photoUrl);
     }
 
+    // 'Última visita' i 'Pròxima cita' es calculen a partir de les cites reals (calendari):
+    // la cita passada més recent i la futura més propera, respectivament.
+    private function visitFields(Patient $patient): array
+    {
+        $now = now();
+        $next = $patient->appointments->first(fn ($a) => $a->startAt->gte($now));
+        $past = $patient->appointments->filter(fn ($a) => $a->startAt->lt($now))->last();
+
+        return [
+            'nextAppointmentAt' => optional($next)->startAt,
+            'lastVisitAt' => optional($past)->startAt,
+        ];
+    }
+
     // List patients of nutricionista
     public function index(Request $request)
     {
         $patients = Patient::where('nutricionistaId', $request->user()->id)
             ->with([
                 'user:id,name,email,phone',
-                'assignments' => fn ($q) => $q->with(['template:id,name,durationDays,iconId', 'template.icon', 'records:id,assignmentId,recordDate']),
+                'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'records:id,assignmentId,recordDate']),
+                'appointments' => fn ($q) => $q->orderBy('startAt'),
             ])
             ->orderBy('createdAt', 'desc')
             ->get();
 
         $result = $patients->map(function (Patient $patient) {
             $array = $patient->toArray();
+            unset($array['appointments']);
             $array['photoUrl'] = UrlHelper::toAbsoluteUrl($patient->photoUrl);
+            $array = array_merge($array, $this->visitFields($patient));
             $array['assignments'] = $patient->assignments->map(function ($assignment) {
                 $data = $assignment->only(['id', 'patientId', 'templateId', 'startDate', 'endDate', 'status', 'customNotes', 'createdAt', 'updatedAt']);
                 $data['template'] = $assignment->template;
                 $data = array_merge($data, RoutineProgress::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate')));
+                $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate'));
 
                 return $data;
             })->values();
@@ -137,18 +156,14 @@ class PatientsController extends Controller
     {
         $patient = Patient::with([
             'user:id,name,email,phone',
-            'assignments.template',
+            'assignments.template.icon',
             'assignments.records' => fn ($q) => $q->orderBy('recordDate', 'desc'),
+            'appointments' => fn ($q) => $q->orderBy('startAt'),
         ])->find($id);
 
         if (! $patient) {
             return response()->json(['error' => 'Pacient no trobat'], 404);
         }
-
-        // Limitem a 50 registres per assignació en PHP (no amb ->limit() a l'eager load): Eloquent
-        // implementaria el límit per relació amb ROW_NUMBER() OVER(...), que MariaDB (usat en local)
-        // no gestiona bé combinat amb aquesta subconsulta ("Mixing of GROUP columns...").
-        $patient->assignments->each(fn ($a) => $a->setRelation('records', $a->records->take(50)));
 
         $user = $request->user();
         $isOwnerNutricionista = $user->role === 'NUTRICIONISTA' && $patient->nutricionistaId === $user->id;
@@ -162,10 +177,27 @@ class PatientsController extends Controller
         }
 
         $array = $patient->toArray();
+        unset($array['appointments']);
         if ($isOwnerPacient) {
             unset($array['notes']); // Les notes són privades del nutricionista
         }
         $array['photoUrl'] = UrlHelper::toAbsoluteUrl($patient->photoUrl);
+        $array = array_merge($array, $this->visitFields($patient));
+
+        // L'adherència/tendència es calculen amb TOTS els registres (abans de limitar-los a
+        // 50 per a la vista): si es fes amb la llista ja retallada, una assignació amb més de
+        // 50 registres sortiria amb l'adherència infravalorada.
+        $array['assignments'] = $patient->assignments->map(function ($assignment) {
+            $data = $assignment->toArray();
+            $data = array_merge($data, RoutineProgress::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate')));
+            $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate'));
+            // Limitem a 50 registres per assignació en PHP (no amb ->limit() a l'eager load): Eloquent
+            // implementaria el límit per relació amb ROW_NUMBER() OVER(...), que MariaDB (usat en
+            // local) no gestiona bé combinat amb aquesta subconsulta ("Mixing of GROUP columns...").
+            $data['records'] = $assignment->records->take(50)->values();
+
+            return $data;
+        })->values();
 
         return response()->json($array);
     }

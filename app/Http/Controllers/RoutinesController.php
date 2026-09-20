@@ -33,6 +33,7 @@ class RoutinesController extends Controller
         $routines = LibraryRoutine::with([
             'icon',
             'fields' => fn ($q) => $q->orderBy('orderIndex'),
+            'fields.fieldIcon',
             'instructions' => fn ($q) => $q->orderBy('orderIndex'),
             'foods.food.category',
         ])->orderBy('name')->get();
@@ -116,6 +117,15 @@ class RoutinesController extends Controller
         return ['data' => $rows->take($perPage)->values(), 'hasMore' => $hasMore];
     }
 
+    // Catàleg de les 8 icones genèriques que es poden assignar a un camp de rutina
+    // (diferents de les icones il·lustrades de rutina/biblioteca, que tenen imageUrl).
+    public function fieldIcons()
+    {
+        $icons = FieldIcon::whereNull('imageUrl')->orderBy('label')->get(['id', 'key', 'label', 'colorToken']);
+
+        return response()->json($icons);
+    }
+
     // Biblioteca de camps reutilitzables: globals (createdById null) + els propis del nutricionista.
     public function fieldLibraryIndex(Request $request)
     {
@@ -177,6 +187,7 @@ class RoutinesController extends Controller
                     'name' => $field->name,
                     'label' => $field->label,
                     'fieldType' => $field->fieldType,
+                    'fieldIconId' => $field->fieldIconId,
                     'frequency' => $field->frequency,
                     'required' => $field->required,
                     'options' => $field->options,

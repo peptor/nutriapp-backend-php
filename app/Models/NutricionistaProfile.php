@@ -17,11 +17,17 @@ class NutricionistaProfile extends Model
     const CREATED_AT = null;
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['userId', 'companyName', 'taxId', 'address', 'postalCode', 'city', 'phone', 'logoUrl', 'brandingTheme'];
+    protected $fillable = [
+        'userId', 'companyName', 'taxId', 'collegiateNumber', 'address', 'postalCode', 'city', 'phone', 'logoUrl', 'brandingTheme',
+        'scheduleMode', 'scheduleCycleStartDate', 'scheduleCycleStartWeek',
+    ];
 
     protected function casts(): array
     {
-        return ['updatedAt' => 'datetime'];
+        return [
+            'scheduleCycleStartDate' => 'date:Y-m-d',
+            'updatedAt' => 'datetime',
+        ];
     }
 
     public function user(): BelongsTo

@@ -26,6 +26,7 @@ class BusinessController extends Controller
         return response()->json([
             'companyName' => $profile?->companyName,
             'taxId' => $profile?->taxId,
+            'collegiateNumber' => $profile?->collegiateNumber,
             'address' => $profile?->address,
             'postalCode' => $profile?->postalCode,
             'city' => $profile?->city,
@@ -65,6 +66,7 @@ class BusinessController extends Controller
         return response()->json([
             'companyName' => $profile->companyName,
             'taxId' => $profile->taxId,
+            'collegiateNumber' => $profile->collegiateNumber,
             'address' => $profile->address,
             'postalCode' => $profile->postalCode,
             'city' => $profile->city,
@@ -73,10 +75,12 @@ class BusinessController extends Controller
         ]);
     }
 
-    // Tema visual (font + logos) que veu el nutricionista: 'classic' o 'v1'.
+    // Tema visual (tipografia) que veu el nutricionista: 'original' (NutriEvo Sans),
+    // 'nutri' (Montserrat) o 'evo' (Poppins). El logo és sempre el mateix, independent
+    // del tema.
     public function updateTheme(Request $request)
     {
-        $data = $request->validate(['theme' => 'required|in:classic,v1']);
+        $data = $request->validate(['theme' => 'required|in:original,nutri,evo']);
 
         $profile = NutricionistaProfile::updateOrCreate(
             ['userId' => $request->user()->id],

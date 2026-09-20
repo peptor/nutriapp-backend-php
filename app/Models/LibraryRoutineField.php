@@ -16,7 +16,7 @@ class LibraryRoutineField extends Model
 
     public $timestamps = false;
 
-    protected $fillable = ['libraryRoutineId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex', 'helpText'];
+    protected $fillable = ['libraryRoutineId', 'name', 'label', 'fieldType', 'fieldIconId', 'frequency', 'required', 'options', 'orderIndex', 'helpText'];
 
     protected function casts(): array
     {
@@ -26,5 +26,10 @@ class LibraryRoutineField extends Model
     public function routine(): BelongsTo
     {
         return $this->belongsTo(LibraryRoutine::class, 'libraryRoutineId');
+    }
+
+    public function fieldIcon(): BelongsTo
+    {
+        return $this->belongsTo(FieldIcon::class, 'fieldIconId');
     }
 }

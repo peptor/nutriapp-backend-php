@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\DashboardController;
@@ -8,6 +9,7 @@ use App\Http\Controllers\FoodLibraryController;
 use App\Http\Controllers\PatientsController;
 use App\Http\Controllers\RecordsController;
 use App\Http\Controllers\RoutinesController;
+use App\Http\Controllers\ScheduleController;
 use Illuminate\Support\Facades\Route;
 
 // ——— Auth ———
@@ -41,11 +43,32 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}/photo', [PatientsController::class, 'deletePhoto'])->middleware('role:NUTRICIONISTA');
     });
 
+    // ——— Appointments ———
+    Route::prefix('appointments')->middleware('role:NUTRICIONISTA')->group(function () {
+        Route::get('/', [AppointmentController::class, 'index']);
+        Route::post('/', [AppointmentController::class, 'store']);
+        Route::put('/{id}', [AppointmentController::class, 'update']);
+        Route::delete('/{id}', [AppointmentController::class, 'destroy']);
+    });
+
+    // ——— Horari (patró de disponibilitat, excepcions i resolució per data) ———
+    Route::prefix('schedule')->middleware('role:NUTRICIONISTA')->group(function () {
+        Route::get('/', [ScheduleController::class, 'show']);
+        Route::put('/pattern', [ScheduleController::class, 'updatePattern']);
+        Route::put('/slots', [ScheduleController::class, 'updateSlots']);
+        Route::get('/resolved', [ScheduleController::class, 'resolved']);
+        Route::get('/exceptions', [ScheduleController::class, 'exceptionsIndex']);
+        Route::post('/exceptions', [ScheduleController::class, 'exceptionsStore']);
+        Route::put('/exceptions/{id}', [ScheduleController::class, 'exceptionsUpdate']);
+        Route::delete('/exceptions/{id}', [ScheduleController::class, 'exceptionsDestroy']);
+    });
+
     // ——— Routines ———
     Route::prefix('routines')->group(function () {
         Route::get('/library', [RoutinesController::class, 'library'])->middleware('role:NUTRICIONISTA');
         Route::get('/foods', [RoutinesController::class, 'foods'])->middleware('role:NUTRICIONISTA,PACIENT');
         Route::get('/food-categories', [RoutinesController::class, 'foodCategories'])->middleware('role:NUTRICIONISTA,PACIENT');
+        Route::get('/field-icons', [RoutinesController::class, 'fieldIcons'])->middleware('role:NUTRICIONISTA');
         Route::get('/field-library', [RoutinesController::class, 'fieldLibraryIndex'])->middleware('role:NUTRICIONISTA');
         Route::post('/field-library', [RoutinesController::class, 'fieldLibraryStore'])->middleware('role:NUTRICIONISTA');
         Route::delete('/field-library/{id}', [RoutinesController::class, 'fieldLibraryDestroy'])->middleware('role:NUTRICIONISTA');
@@ -89,7 +112,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('dashboard')->group(function () {
         Route::get('/overview', [DashboardController::class, 'overview'])->middleware('role:NUTRICIONISTA');
         Route::get('/summary/{assignmentId}', [DashboardController::class, 'summary']);
-        Route::get('/preconsulta/{assignmentId}', [DashboardController::class, 'preconsulta'])->middleware('role:NUTRICIONISTA');
     });
 
     // ——— Business ———

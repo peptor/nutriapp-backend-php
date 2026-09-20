@@ -17,14 +17,42 @@ class DashboardController extends Controller
 
         return [
             'name' => $nutricionista->name,
+            'email' => $nutricionista->email,
             'companyName' => $profile?->companyName,
             'taxId' => $profile?->taxId,
+            'collegiateNumber' => $profile?->collegiateNumber,
             'address' => $profile?->address,
             'postalCode' => $profile?->postalCode,
             'city' => $profile?->city,
             'phone' => $profile?->phone,
             'logoUrl' => UrlHelper::toAbsoluteUrl($profile?->logoUrl),
         ];
+    }
+
+    // Classificació de la pressió arterial segons l'edat del pacient (guies clíniques
+    // generals; per defecte -edat desconeguda- es fa servir la franja d'adult 18-64).
+    // Retorna null si els valors estan dins del rang de referència.
+    private function bloodPressureIncidence(float $sys, float $dia, ?int $age): ?array
+    {
+        if ($age !== null && $age <= 5) {
+            return ($sys > 110 || $dia > 79) ? ['severity' => 'HIGH', 'reference' => '≤ 110 / 79 mmHg'] : null;
+        }
+        if ($age !== null && $age <= 13) {
+            return ($sys > 115 || $dia > 80) ? ['severity' => 'HIGH', 'reference' => '≤ 115 / 80 mmHg'] : null;
+        }
+        if ($age !== null && $age >= 80) {
+            if ($sys > 150) {
+                return ['severity' => 'HIGH', 'reference' => '140 – 150 / > 70 mmHg'];
+            }
+
+            return $dia < 70 ? ['severity' => 'LOW', 'reference' => '140 – 150 / > 70 mmHg'] : null;
+        }
+        if ($age !== null && $age >= 65) {
+            return ($sys >= 140 || $dia >= 90) ? ['severity' => 'HIGH', 'reference' => '< 140 / 90 mmHg'] : null;
+        }
+
+        // Adults (18-64 anys) i per defecte quan no es coneix l'edat del pacient.
+        return ($sys >= 130 || $dia >= 85) ? ['severity' => 'HIGH', 'reference' => '< 130 / 85 mmHg'] : null;
     }
 
     // Nutricionista overview
@@ -73,7 +101,7 @@ class DashboardController extends Controller
             'template.fields' => fn ($q) => $q->orderBy('orderIndex'),
             'template.fields.fieldIcon',
             'patient.user:id,name,email',
-            'patient.nutricionista:id,name',
+            'patient.nutricionista:id,name,email',
             'patient.nutricionista.nutricionistaProfile',
         ])->find($assignmentId);
 
@@ -116,6 +144,86 @@ class DashboardController extends Controller
             ];
         }
 
+        $fieldTypeByName = $assignment->template->fields->pluck('fieldType', 'name');
+        $fieldLabelByName = $assignment->template->fields->pluck('label', 'name');
+        $fieldGoodDirectionByName = $assignment->template->fields->pluck('goodDirection', 'name');
+        $labelOf = fn (string $name) => $fieldLabelByName[$name] ?? $name;
+
+        // Incidències: valors fora del rang recomanat. De moment només es detecten per a
+        // dos tipus de camp:
+        // - Escala 0-10: només si el camp té una "direcció bona" definida, perquè si no no
+        //   sabem quin extrem (0-2 o 8-10) és el preocupant. L'extrem contrari a la direcció
+        //   bona és el que es marca com a incidència.
+        // - Pressió arterial: segons l'edat del pacient (veure bloodPressureIncidence()).
+        $patientAge = $assignment->patient->birthDate ? Carbon::parse($assignment->patient->birthDate)->age : null;
+        $incidencies = $records
+            ->map(function ($r) use ($fieldTypeByName, $fieldGoodDirectionByName, $labelOf, $patientAge) {
+                $fieldType = $fieldTypeByName[$r->fieldName] ?? null;
+                $date = Carbon::parse($r->recordDate)->toDateString();
+                $field = $labelOf($r->fieldName);
+
+                if ($fieldType === 'SCALE' && is_numeric($r->value)) {
+                    $value = (float) $r->value;
+                    $direction = $fieldGoodDirectionByName[$r->fieldName] ?? null;
+                    if ($direction === 'LOW' && $value >= 8) {
+                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'HIGH', 'reference' => '0 – 7'];
+                    }
+                    if ($direction === 'HIGH' && $value <= 2) {
+                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'LOW', 'reference' => '3 – 10'];
+                    }
+
+                    return null;
+                }
+
+                if ($fieldType === 'BLOOD_PRESSURE' && is_array($r->value)) {
+                    $sys = is_numeric($r->value['tensio_sistolica'] ?? null) ? (float) $r->value['tensio_sistolica'] : null;
+                    $dia = is_numeric($r->value['tensio_diastolica'] ?? null) ? (float) $r->value['tensio_diastolica'] : null;
+                    if ($sys === null || $dia === null) {
+                        return null;
+                    }
+                    $bp = $this->bloodPressureIncidence($sys, $dia, $patientAge);
+                    if ($bp === null) {
+                        return null;
+                    }
+
+                    return ['date' => $date, 'field' => $field, 'value' => "{$r->value['tensio_sistolica']} / {$r->value['tensio_diastolica']}", 'severity' => $bp['severity'], 'reference' => $bp['reference']];
+                }
+
+                return null;
+            })
+            ->filter()
+            ->values();
+
+        // Camps NUMBER (a diferència de SCALE/BOOLEAN/BLOOD_PRESSURE/TEXT/MEAL) que
+        // tendeixen a pujar: primer i últim valor registrat en el període.
+        $risingNumberFields = collect($byField)
+            ->reject(fn ($entries, $field) => $field === 'food_log' || in_array($fieldTypeByName[$field] ?? null, ['MEAL', 'SCALE', 'BOOLEAN', 'BLOOD_PRESSURE', 'TEXT'], true))
+            ->map(function ($entries, $field) use ($labelOf) {
+                $nums = collect($entries)->map(fn ($e) => is_numeric($e['value']) ? (float) $e['value'] : null)->filter(fn ($n) => $n !== null)->values();
+                if ($nums->count() < 2) {
+                    return null;
+                }
+
+                return ['field' => $labelOf($field), 'first' => $nums->first(), 'last' => $nums->last()];
+            })
+            ->filter();
+
+        $puntsARevisar = [];
+        if ($adherencePercent < 60) {
+            $puntsARevisar[] = "Adherència baixa ($adherencePercent%). Valorar obstacles o simplificar la rutina.";
+        }
+        if ($incidencies->count() >= 3) {
+            $puntsARevisar[] = "{$incidencies->count()} registres fora del rang recomanat. Revisar símptomes i context.";
+        }
+        foreach ($risingNumberFields as $v) {
+            if ($v['last'] > $v['first'] && $v['last'] >= 6) {
+                $puntsARevisar[] = "La variable \"{$v['field']}\" tendeix a pujar (últim valor: {$v['last']}).";
+            }
+        }
+        if (empty($puntsARevisar)) {
+            $puntsARevisar[] = 'Sense alertes destacades. Revisar evolució general i objectius.';
+        }
+
         $days = [];
         $cursor = $start->copy();
         while ($cursor->lte($end)) {
@@ -144,6 +252,7 @@ class DashboardController extends Controller
                 'templateName' => $assignment->template->name,
                 'objective' => $assignment->template->objective,
                 'patientName' => $assignment->patient->user->name,
+                'patientBirthDate' => $assignment->patient->birthDate,
                 'fields' => $assignment->template->fields,
                 'foodLogEnabled' => $assignment->template->foodLogEnabled,
             ],
@@ -155,154 +264,10 @@ class DashboardController extends Controller
             'fullDurationDays' => $fullDurationDays,
             'totalRecords' => $records->count(),
             'recordsByField' => $byField,
+            'incidencies' => $incidencies->slice(-10)->reverse()->values(),
+            'puntsARevisar' => $puntsARevisar,
             'days' => $days,
         ]);
     }
 
-    // Informe preconsulta (més llegible per a la visita)
-    public function preconsulta(Request $request, string $assignmentId)
-    {
-        $assignment = RoutineAssignment::with([
-            'template.fields' => fn ($q) => $q->orderBy('orderIndex'),
-            'template.fields.fieldIcon',
-            'patient.user:id,name,email,phone',
-            'patient.nutricionista:id,name',
-            'patient.nutricionista.nutricionistaProfile',
-        ])->find($assignmentId);
-
-        if (! $assignment) {
-            return response()->json(['error' => 'Assignació no trobada'], 404);
-        }
-        if ($assignment->patient->nutricionistaId !== $request->user()->id) {
-            return response()->json(['error' => 'Accés denegat'], 403);
-        }
-
-        $records = $assignment->records()->orderBy('recordDate')->orderBy('fieldName')->get();
-
-        AccessLogger::log($request->user()->id, $request->user()->role, 'VIEW_PRECONSULTA', 'RoutineAssignment', $assignment->id);
-
-        $start = Carbon::parse($assignment->startDate)->startOfDay();
-        $end = Carbon::parse($assignment->endDate)->startOfDay();
-        $today = Carbon::now('UTC')->startOfDay();
-        $effectiveEnd = $today->lt($end) ? $today : $end;
-        $totalDays = max(1, $start->diffInDays($effectiveEnd) + 1);
-
-        $daysWithRecords = $records->map(fn ($r) => Carbon::parse($r->recordDate)->toDateString())->unique()->count();
-        $adherencePercent = (int) round(($daysWithRecords / $totalDays) * 100);
-
-        $byField = [];
-        foreach ($records as $r) {
-            $byField[$r->fieldName][] = ['date' => Carbon::parse($r->recordDate)->toDateString(), 'value' => $r->value, 'notes' => $r->notes];
-        }
-
-        $fieldTypeByName = $assignment->template->fields->pluck('fieldType', 'name');
-        $fieldLabelByName = $assignment->template->fields->pluck('label', 'name');
-        $labelOf = fn (string $name) => $fieldLabelByName[$name] ?? $name;
-
-        // El registre d'àpats (camp sintètic "food_log", valor un objecte per àpat) ja té
-        // la seva pròpia secció ("Detall d'àpats"); no té sentit resumir-lo com a variable.
-        $variableSummaries = collect($byField)
-            ->reject(fn ($entries, $field) => $field === 'food_log' || ($fieldTypeByName[$field] ?? null) === 'MEAL')
-            ->map(function ($entries, $field) use ($fieldTypeByName, $labelOf) {
-                $fieldType = $fieldTypeByName[$field] ?? null;
-
-                if ($fieldType === 'BLOOD_PRESSURE') {
-                    $systolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_sistolica'] ?? null) ? (float) $e['value']['tensio_sistolica'] : null)->filter(fn ($n) => $n !== null);
-                    $diastolics = collect($entries)->map(fn ($e) => is_numeric($e['value']['tensio_diastolica'] ?? null) ? (float) $e['value']['tensio_diastolica'] : null)->filter(fn ($n) => $n !== null);
-                    $avg = fn ($nums) => round($nums->avg(), 1);
-
-                    return [
-                        'field' => $labelOf($field), 'type' => 'blood_pressure', 'count' => count($entries),
-                        'avgSystolic' => $systolics->isNotEmpty() ? $avg($systolics) : null,
-                        'avgDiastolic' => $diastolics->isNotEmpty() ? $avg($diastolics) : null,
-                    ];
-                }
-
-                if ($fieldType === 'BOOLEAN') {
-                    $bools = collect($entries)->map(fn ($e) => in_array($e['value'], [true, 1, '1', 'true'], true));
-                    $yes = $bools->filter(fn ($b) => $b)->count();
-                    $no = $bools->count() - $yes;
-                    $first = $bools->first();
-                    $last = $bools->last();
-
-                    return [
-                        'field' => $labelOf($field), 'type' => 'boolean', 'count' => $bools->count(),
-                        'majority' => $yes === $no ? 'Empat' : ($yes > $no ? 'Sí' : 'No'),
-                        'yesCount' => $yes, 'noCount' => $no,
-                        'trend' => $last === $first ? 'estable' : ($last ? 'puja' : 'baixa'),
-                    ];
-                }
-
-                // NUMBER / SCALE (o qualsevol altre camp amb valors numèrics).
-                $nums = collect($entries)->map(fn ($e) => is_numeric($e['value']) ? (float) $e['value'] : null)->filter(fn ($n) => $n !== null)->values();
-                if ($nums->isEmpty()) {
-                    // TEXT / SELECT (i altres tipus sense valors numèrics): només comptem i mostrem l'últim.
-                    $lastValue = end($entries)['value'] ?? null;
-
-                    return ['field' => $labelOf($field), 'type' => 'text', 'count' => count($entries), 'lastValue' => is_scalar($lastValue) ? $lastValue : null];
-                }
-                $first = $nums->first();
-                $last = $nums->last();
-
-                return [
-                    'field' => $labelOf($field), 'type' => 'number', 'count' => $nums->count(),
-                    'avg' => round($nums->avg(), 1), 'min' => $nums->min(), 'max' => $nums->max(),
-                    'first' => $first, 'last' => $last,
-                    'trend' => $last > $first ? 'puja' : ($last < $first ? 'baixa' : 'estable'),
-                ];
-            })->values();
-
-        // Incidències senzilles: valors alts (>= 7 en escales 0-10). Només té sentit
-        // per a camps d'escala: un NUMBER (p. ex. pes) no és una escala 0-10.
-        $incidencies = $records->filter(fn ($r) => ($fieldTypeByName[$r->fieldName] ?? null) === 'SCALE' && is_numeric($r->value))
-            ->filter(fn ($r) => (float) $r->value >= 7)
-            ->map(fn ($r) => ['date' => Carbon::parse($r->recordDate)->toDateString(), 'field' => $labelOf($r->fieldName), 'value' => $r->value])
-            ->values();
-
-        $puntsARevisar = [];
-        if ($adherencePercent < 60) {
-            $puntsARevisar[] = "Adherència baixa ($adherencePercent%). Valorar obstacles o simplificar la rutina.";
-        }
-        if ($incidencies->count() >= 3) {
-            $puntsARevisar[] = "{$incidencies->count()} registres amb valors alts (≥7). Revisar símptomes i context.";
-        }
-        foreach ($variableSummaries as $v) {
-            if (($v['type'] ?? null) === 'number' && ($v['trend'] ?? null) === 'puja' && $v['last'] >= 6) {
-                $puntsARevisar[] = "La variable \"{$v['field']}\" tendeix a pujar (últim valor: {$v['last']}).";
-            }
-        }
-        if (empty($puntsARevisar)) {
-            $puntsARevisar[] = 'Sense alertes destacades. Revisar evolució general i objectius.';
-        }
-
-        return response()->json([
-            'pacient' => [
-                'id' => $assignment->patient->id,
-                'name' => $assignment->patient->user->name,
-                'email' => $assignment->patient->user->email,
-                'phone' => $assignment->patient->user->phone,
-                'gender' => $assignment->patient->gender,
-                'photoUrl' => UrlHelper::toAbsoluteUrl($assignment->patient->photoUrl),
-            ],
-            'professional' => $this->professionalOf($assignment->patient->nutricionista),
-            'rutina' => [
-                'assignmentId' => $assignment->id,
-                'templateName' => $assignment->template->name,
-                'objective' => $assignment->template->objective,
-                'status' => $assignment->status,
-                'startDate' => $assignment->startDate,
-                'endDate' => $assignment->endDate,
-            ],
-            'adherencia' => [
-                'percent' => $adherencePercent,
-                'daysWithRecords' => $daysWithRecords,
-                'totalDays' => $totalDays,
-                'totalRecords' => $records->count(),
-            ],
-            'variables' => $variableSummaries,
-            'incidencies' => $incidencies->slice(-10)->values(),
-            'puntsARevisar' => $puntsARevisar,
-            'generatedAt' => now()->toIso8601String(),
-        ]);
-    }
 }

@@ -15,7 +15,7 @@ class BusinessProfileRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $fields = ['companyName', 'taxId', 'address', 'postalCode', 'city', 'phone'];
+        $fields = ['companyName', 'taxId', 'collegiateNumber', 'address', 'postalCode', 'city', 'phone'];
         $normalized = [];
         foreach ($fields as $field) {
             if ($this->input($field) === '') {
@@ -32,6 +32,7 @@ class BusinessProfileRequest extends FormRequest
         return [
             'companyName' => ['nullable', 'string', 'max:150'],
             'taxId' => ['nullable', 'string', 'max:20'],
+            'collegiateNumber' => ['nullable', 'string', 'max:40'],
             'address' => ['nullable', 'string', 'max:200'],
             'postalCode' => ['nullable', 'string', 'max:10'],
             'city' => ['nullable', 'string', 'max:100'],
