@@ -7,6 +7,7 @@ use App\Http\Requests\DailyRecordRequest;
 use App\Models\DailyRecord;
 use App\Models\RoutineAssignment;
 use App\Support\AccessLogger;
+use App\Support\FieldFrequencies;
 use App\Support\FieldValueValidator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -19,6 +20,25 @@ class RecordsController extends Controller
         $end = Carbon::parse($assignment->endDate)->startOfDay();
 
         return $date->gte($start) && $date->lte($end);
+    }
+
+    // Un camp setmanal té un sol valor per setmana (bloc de 7 dies des de l'inici de la rutina): en
+    // desar-ne un, s'esborra el que ja hi hagués en una altra data del mateix bloc.
+    private function replaceWeeklyValue(RoutineAssignment $assignment, string $fieldName, Carbon $date): void
+    {
+        [$from, $to] = FieldFrequencies::weekRange((string) $assignment->startDate, $date->toDateString());
+
+        DailyRecord::where('assignmentId', $assignment->id)
+            ->where('fieldName', $fieldName)
+            ->whereDate('recordDate', '>=', $from)
+            ->whereDate('recordDate', '<=', $to)
+            ->whereDate('recordDate', '!=', $date->toDateString())
+            ->delete();
+    }
+
+    private function isWeekly(RoutineAssignment $assignment, string $fieldName): bool
+    {
+        return $assignment->template->fields->firstWhere('name', $fieldName)?->frequency === 'weekly';
     }
 
     private function isMissingValue(mixed $value): bool
@@ -78,6 +98,9 @@ class RecordsController extends Controller
             ['assignmentId' => $data['assignmentId'], 'recordDate' => $date, 'fieldName' => $data['fieldName']],
             ['patientId' => $assignment->patientId, 'value' => $data['value'], 'notes' => $data['notes'] ?? null, 'recordedBy' => $recordedBy],
         );
+        if ($this->isWeekly($assignment, $data['fieldName']) && ! $this->isMissingValue($data['value'])) {
+            $this->replaceWeeklyValue($assignment, $data['fieldName'], $date);
+        }
 
         return response()->json($record, 201);
     }
@@ -107,7 +130,7 @@ class RecordsController extends Controller
 
         $entryByName = $names->combine($data['entries'])->map(fn ($e) => $e['value'] ?? null);
         $missingRequired = $assignment->template->fields->filter(
-            fn ($field) => $field->required && $this->isMissingValue($entryByName->get($field->name))
+            fn ($field) => $field->required && $field->frequency !== 'weekly' && $this->isMissingValue($entryByName->get($field->name))
         );
         if ($missingRequired->isNotEmpty()) {
             return response()->json(['error' => 'Falten camps obligatoris: '.$missingRequired->pluck('label')->join(', ')], 400);
@@ -124,10 +147,22 @@ class RecordsController extends Controller
 
         $recordedBy = $request->user()->role === 'NUTRICIONISTA' ? 'NUTRICIONISTA' : 'PACIENT';
 
-        $results = collect($data['entries'])->map(fn ($e) => DailyRecord::updateOrCreate(
-            ['assignmentId' => $data['assignmentId'], 'recordDate' => $date, 'fieldName' => $e['fieldName']],
-            ['patientId' => $assignment->patientId, 'value' => $e['value'], 'notes' => $e['notes'] ?? null, 'recordedBy' => $recordedBy],
-        ));
+        // Un camp setmanal sense valor no es desa: no ha de deixar un registre buit ni esborrar el de la setmana.
+        $entries = collect($data['entries'])->reject(
+            fn ($e) => $this->isWeekly($assignment, $e['fieldName']) && $this->isMissingValue($e['value'] ?? null)
+        );
+
+        $results = $entries->map(function ($e) use ($data, $date, $assignment, $recordedBy) {
+            $record = DailyRecord::updateOrCreate(
+                ['assignmentId' => $data['assignmentId'], 'recordDate' => $date, 'fieldName' => $e['fieldName']],
+                ['patientId' => $assignment->patientId, 'value' => $e['value'], 'notes' => $e['notes'] ?? null, 'recordedBy' => $recordedBy],
+            );
+            if ($this->isWeekly($assignment, $e['fieldName'])) {
+                $this->replaceWeeklyValue($assignment, $e['fieldName'], $date);
+            }
+
+            return $record;
+        })->values();
 
         return response()->json($results, 201);
     }

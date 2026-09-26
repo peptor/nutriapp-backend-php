@@ -34,6 +34,9 @@ class CreateRoutineTemplateRequest extends FormRequest
             'fields.*.orderIndex' => ['sometimes', 'integer', 'min:0'],
             'fields.*.goodDirection' => ['nullable', Rule::in(['LOW', 'HIGH'])],
             'fields.*.unit' => ['nullable', 'string', 'max:20'],
+            'fields.*.helpText' => ['nullable', 'string', 'max:300'],
+            'fields.*.scaleMin' => ['nullable', 'integer', 'min:0', 'max:99'],
+            'fields.*.scaleMax' => ['nullable', 'integer', 'min:1', 'max:100'],
             'foods' => ['sometimes', 'array'],
             'foods.*.foodId' => ['required', 'uuid'],
             'foods.*.use' => ['required', Rule::in(['RECOMMENDED', 'LIMIT', 'AVOID'])],
@@ -47,6 +50,9 @@ class CreateRoutineTemplateRequest extends FormRequest
             foreach ((array) $this->input('fields', []) as $idx => $field) {
                 if (($field['fieldType'] ?? null) === 'SELECT' && (! is_array($field['options'] ?? null) || count($field['options']) === 0)) {
                     $validator->errors()->add("fields.$idx.options", 'Defineix almenys una opció');
+                }
+                if (($field['fieldType'] ?? null) === 'SCALE' && (int) ($field['scaleMax'] ?? 10) <= (int) ($field['scaleMin'] ?? 0)) {
+                    $validator->errors()->add("fields.$idx.scaleMax", 'El màxim ha de ser més gran que el mínim');
                 }
             }
         });

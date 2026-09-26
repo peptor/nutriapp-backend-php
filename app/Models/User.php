@@ -22,7 +22,7 @@ class User extends Authenticatable
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['email', 'passwordHash', 'name', 'role', 'phone', 'deletedAt'];
+    protected $fillable = ['email', 'passwordHash', 'name', 'role', 'phone', 'deletedAt', 'notifyMessagesByEmail'];
 
     protected $hidden = ['passwordHash', 'remember_token'];
 
@@ -30,6 +30,7 @@ class User extends Authenticatable
     {
         return [
             'deletedAt' => 'datetime',
+            'notifyMessagesByEmail' => 'boolean',
             'createdAt' => 'datetime',
             'updatedAt' => 'datetime',
         ];

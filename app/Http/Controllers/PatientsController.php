@@ -50,7 +50,7 @@ class PatientsController extends Controller
         $patients = Patient::where('nutricionistaId', $request->user()->id)
             ->with([
                 'user:id,name,email,phone',
-                'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'records:id,assignmentId,recordDate']),
+                'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'records:id,assignmentId,recordDate,fieldName']),
                 'appointments' => fn ($q) => $q->orderBy('startAt'),
             ])
             ->orderBy('createdAt', 'desc')
@@ -64,8 +64,8 @@ class PatientsController extends Controller
             $array['assignments'] = $patient->assignments->map(function ($assignment) {
                 $data = $assignment->only(['id', 'patientId', 'templateId', 'startDate', 'endDate', 'status', 'customNotes', 'createdAt', 'updatedAt']);
                 $data['template'] = $assignment->template;
-                $data = array_merge($data, RoutineProgress::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate')));
-                $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate'));
+                $data = array_merge($data, RoutineProgress::forAssignment($assignment));
+                $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment));
 
                 return $data;
             })->values();
@@ -189,8 +189,8 @@ class PatientsController extends Controller
         // 50 registres sortiria amb l'adherència infravalorada.
         $array['assignments'] = $patient->assignments->map(function ($assignment) {
             $data = $assignment->toArray();
-            $data = array_merge($data, RoutineProgress::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate')));
-            $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, $assignment->records->pluck('recordDate'));
+            $data = array_merge($data, RoutineProgress::forAssignment($assignment));
+            $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment));
             // Limitem a 50 registres per assignació en PHP (no amb ->limit() a l'eager load): Eloquent
             // implementaria el límit per relació amb ROW_NUMBER() OVER(...), que MariaDB (usat en
             // local) no gestiona bé combinat amb aquesta subconsulta ("Mixing of GROUP columns...").

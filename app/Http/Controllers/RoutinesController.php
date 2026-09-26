@@ -191,6 +191,11 @@ class RoutinesController extends Controller
                     'frequency' => $field->frequency,
                     'required' => $field->required,
                     'options' => $field->options,
+                    'scaleMin' => $field->scaleMin,
+                    'scaleMax' => $field->scaleMax,
+                    'goodDirection' => $field->goodDirection,
+                    'unit' => $field->unit,
+                    'helpText' => $field->helpText,
                     'orderIndex' => $field->orderIndex,
                 ]);
             }
@@ -279,6 +284,9 @@ class RoutinesController extends Controller
                     'fieldIconId' => $f['fieldIconId'] ?? null,
                     'goodDirection' => $f['goodDirection'] ?? null,
                     'unit' => $f['unit'] ?? null,
+                    'helpText' => $f['helpText'] ?? null,
+                    'scaleMin' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMin'] ?? 0) : 0,
+                    'scaleMax' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMax'] ?? 10) : 10,
                 ]);
             }
             foreach (($data['foods'] ?? []) as $f) {
@@ -326,6 +334,9 @@ class RoutinesController extends Controller
                         'fieldIconId' => $f['fieldIconId'] ?? null,
                         'goodDirection' => $f['goodDirection'] ?? null,
                         'unit' => $f['unit'] ?? null,
+                        'helpText' => $f['helpText'] ?? null,
+                        'scaleMin' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMin'] ?? 0) : 0,
+                        'scaleMax' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMax'] ?? 10) : 10,
                     ]);
                 }
             }
@@ -460,7 +471,7 @@ class RoutinesController extends Controller
                 'logoUrl' => UrlHelper::toAbsoluteUrl($a->patient->nutricionista->nutricionistaProfile?->logoUrl),
             ];
             $array['computedStatus'] = $computedStatus;
-            $array = array_merge($array, RoutineProgress::of($a->startDate, $a->endDate, $a->records->pluck('recordDate')));
+            $array = array_merge($array, RoutineProgress::forAssignment($a));
 
             return $array;
         });
@@ -487,6 +498,8 @@ class RoutinesController extends Controller
         $assignment->update([
             'status' => $status,
             'evolutionRating' => $status === 'COMPLETED' ? $request->validated('evolutionRating') : $assignment->evolutionRating,
+            // Moment en què es va completar; es buida si la rutina es reactiva o es cancel·la.
+            'completedAt' => $status !== 'COMPLETED' ? null : ($assignment->status === 'COMPLETED' ? ($assignment->completedAt ?? now()) : now()),
         ]);
         $assignment->load(['template:id,name,durationDays', 'patient.user:id,name,email']);
 

@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Patient;
 use App\Models\RoutineAssignment;
 use App\Support\AccessLogger;
+use App\Support\FieldFrequencies;
+use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -59,34 +61,44 @@ class DashboardController extends Controller
     public function overview(Request $request)
     {
         $nutricionistaId = $request->user()->id;
-        $lastMonthCutoff = now()->subDays(30);
+        $cutoff = now()->subDays(15);
 
-        $patients = Patient::where('nutricionistaId', $nutricionistaId)->count();
-        $newPatients = Patient::where('nutricionistaId', $nutricionistaId)->where('createdAt', '>=', $lastMonthCutoff)->count();
-        $activeAssignments = RoutineAssignment::where('status', 'ACTIVE')
-            ->whereHas('patient', fn ($q) => $q->where('nutricionistaId', $nutricionistaId))->count();
-        $newActiveAssignments = RoutineAssignment::where('status', 'ACTIVE')->where('createdAt', '>=', $lastMonthCutoff)
-            ->whereHas('patient', fn ($q) => $q->where('nutricionistaId', $nutricionistaId))->count();
+        // Només pacients amb el compte actiu: un pacient eliminat (anonimitzat) manté la fila
+        // sys_patients però ja no ha de comptar als indicadors.
+        $ownPatients = fn () => Patient::where('nutricionistaId', $nutricionistaId)
+            ->whereHas('user', fn ($q) => $q->whereNull('deletedAt'));
+        $ownAssignments = fn () => RoutineAssignment::whereHas('patient', function ($q) use ($nutricionistaId) {
+            $q->where('nutricionistaId', $nutricionistaId)->whereHas('user', fn ($u) => $u->whereNull('deletedAt'));
+        });
+
+        $patients = $ownPatients()->count();
+        $newPatients = $ownPatients()->where('createdAt', '>=', $cutoff)->count();
+        $activeAssignments = $ownAssignments()->where('status', 'ACTIVE')->count();
+        // Rutines actives que es van assignar en els últims 15 dies.
+        $newActiveAssignments = $ownAssignments()->where('status', 'ACTIVE')->where('createdAt', '>=', $cutoff)->count();
+        $completedAssignments = $ownAssignments()->where('status', 'COMPLETED')->count();
+        $newCompletedAssignments = $ownAssignments()->where('status', 'COMPLETED')->where('completedAt', '>=', $cutoff)->count();
 
         // Pacients amb almenys una rutina activa ("en seguiment").
-        $patientsInFollowUp = Patient::where('nutricionistaId', $nutricionistaId)
+        $patientsInFollowUp = $ownPatients()
             ->whereHas('assignments', fn ($q) => $q->where('status', 'ACTIVE'))
             ->count();
         $patientsInFollowUpPercent = $patients > 0 ? (int) round(($patientsInFollowUp / $patients) * 100) : 0;
 
         // % de rutines completades i valorades pel nutricionista que han anat bé, sobre
         // el total de rutines completades que sí que es van poder valorar (prou dades).
-        $ratedAssignments = RoutineAssignment::whereNotNull('evolutionRating')
-            ->whereHas('patient', fn ($q) => $q->where('nutricionistaId', $nutricionistaId));
+        $ratedAssignments = $ownAssignments()->whereNotNull('evolutionRating');
         $ratedTotal = (clone $ratedAssignments)->count();
         $positiveTotal = (clone $ratedAssignments)->where('evolutionRating', 'POSITIVE')->count();
         $positiveEvolutionPercent = $ratedTotal > 0 ? (int) round(($positiveTotal / $ratedTotal) * 100) : null;
 
         return response()->json([
             'totalPatients' => $patients,
-            'newPatientsLastMonth' => $newPatients,
+            'newPatientsLast15Days' => $newPatients,
             'activeRoutines' => $activeAssignments,
-            'newActiveRoutinesLastMonth' => $newActiveAssignments,
+            'newActiveRoutinesLast15Days' => $newActiveAssignments,
+            'completedRoutines' => $completedAssignments,
+            'newCompletedRoutinesLast15Days' => $newCompletedAssignments,
             'patientsInFollowUp' => $patientsInFollowUp,
             'patientsInFollowUpPercent' => $patientsInFollowUpPercent,
             'positiveEvolutionPercent' => $positiveEvolutionPercent,
@@ -127,13 +139,23 @@ class DashboardController extends Controller
         $today = Carbon::now('UTC')->startOfDay();
         $effectiveEnd = $today->lt($end) ? $today : $end;
 
-        $totalDays = max(1, $start->diffInDays($effectiveEnd) + 1);
-        $fullDurationDays = max(1, $start->diffInDays($end) + 1);
-
-        $daysWithRecordsSet = $records->map(fn ($r) => Carbon::parse($r->recordDate)->toDateString())->unique();
-        $daysWithRecords = $daysWithRecordsSet->count();
-        $adherencePercent = (int) round(($daysWithRecords / $totalDays) * 100);
-        $completedPercent = (int) round(($daysWithRecords / $fullDurationDays) * 100);
+        // Adherència: els registres de camps setmanals no compten com a dia registrat; si tots els
+        // camps de la rutina són setmanals es compten setmanes (veure RoutineProgress).
+        $frequencies = FieldFrequencies::forTemplate($assignment->templateId);
+        $countedRecords = $frequencies['allWeekly']
+            ? $records
+            : $records->reject(fn ($r) => in_array($r->fieldName, $frequencies['weekly'], true));
+        $progress = RoutineProgress::of(
+            $assignment->startDate,
+            $assignment->endDate,
+            $countedRecords->pluck('recordDate'),
+            $frequencies['allWeekly'] ? 'weeks' : 'days'
+        );
+        $totalDays = $progress['elapsedDays'];
+        $fullDurationDays = $progress['totalDays'];
+        $daysWithRecords = $progress['daysWithRecords'];
+        $adherencePercent = $progress['adherencePercent'];
+        $completedPercent = $progress['completedPercent'];
 
         $byField = [];
         foreach ($records as $r) {
@@ -147,17 +169,19 @@ class DashboardController extends Controller
         $fieldTypeByName = $assignment->template->fields->pluck('fieldType', 'name');
         $fieldLabelByName = $assignment->template->fields->pluck('label', 'name');
         $fieldGoodDirectionByName = $assignment->template->fields->pluck('goodDirection', 'name');
+        $fieldByName = $assignment->template->fields->keyBy('name');
         $labelOf = fn (string $name) => $fieldLabelByName[$name] ?? $name;
 
         // Incidències: valors fora del rang recomanat. De moment només es detecten per a
         // dos tipus de camp:
-        // - Escala 0-10: només si el camp té una "direcció bona" definida, perquè si no no
-        //   sabem quin extrem (0-2 o 8-10) és el preocupant. L'extrem contrari a la direcció
-        //   bona és el que es marca com a incidència.
+        // - Escala (rang configurable, per defecte 0-10): només si el camp té una "direcció
+        //   bona" definida, perquè si no no sabem quin extrem és el preocupant. L'extrem
+        //   contrari a la direcció bona és el que es marca com a incidència: el 20% inferior
+        //   o el 20% superior del rang (0-2 o 8-10 en una escala 0-10).
         // - Pressió arterial: segons l'edat del pacient (veure bloodPressureIncidence()).
         $patientAge = $assignment->patient->birthDate ? Carbon::parse($assignment->patient->birthDate)->age : null;
         $incidencies = $records
-            ->map(function ($r) use ($fieldTypeByName, $fieldGoodDirectionByName, $labelOf, $patientAge) {
+            ->map(function ($r) use ($fieldTypeByName, $fieldGoodDirectionByName, $fieldByName, $labelOf, $patientAge) {
                 $fieldType = $fieldTypeByName[$r->fieldName] ?? null;
                 $date = Carbon::parse($r->recordDate)->toDateString();
                 $field = $labelOf($r->fieldName);
@@ -165,11 +189,16 @@ class DashboardController extends Controller
                 if ($fieldType === 'SCALE' && is_numeric($r->value)) {
                     $value = (float) $r->value;
                     $direction = $fieldGoodDirectionByName[$r->fieldName] ?? null;
-                    if ($direction === 'LOW' && $value >= 8) {
-                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'HIGH', 'reference' => '0 – 7'];
+                    $scaleMin = (int) ($fieldByName[$r->fieldName]->scaleMin ?? 0);
+                    $scaleMax = (int) ($fieldByName[$r->fieldName]->scaleMax ?? 10);
+                    $span = $scaleMax - $scaleMin;
+                    $highFrom = $scaleMin + intdiv(8 * $span + 9, 10); // primer valor del 20% superior
+                    $lowTo = $scaleMin + intdiv(2 * $span, 10); // últim valor del 20% inferior
+                    if ($direction === 'LOW' && $value >= $highFrom) {
+                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'HIGH', 'reference' => $scaleMin.' – '.($highFrom - 1)];
                     }
-                    if ($direction === 'HIGH' && $value <= 2) {
-                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'LOW', 'reference' => '3 – 10'];
+                    if ($direction === 'HIGH' && $value <= $lowTo) {
+                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'LOW', 'reference' => ($lowTo + 1).' – '.$scaleMax];
                     }
 
                     return null;
@@ -262,6 +291,7 @@ class DashboardController extends Controller
             'daysWithRecords' => $daysWithRecords,
             'totalDays' => $totalDays,
             'fullDurationDays' => $fullDurationDays,
+            'progressUnit' => $progress['progressUnit'],
             'totalRecords' => $records->count(),
             'recordsByField' => $byField,
             'incidencies' => $incidencies->slice(-10)->reverse()->values(),

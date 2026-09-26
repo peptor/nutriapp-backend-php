@@ -17,11 +17,11 @@ class RoutineField extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = null;
 
-    protected $fillable = ['templateId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex', 'fieldIconId', 'goodDirection', 'unit'];
+    protected $fillable = ['templateId', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'orderIndex', 'fieldIconId', 'goodDirection', 'unit', 'helpText', 'scaleMin', 'scaleMax'];
 
     protected function casts(): array
     {
-        return ['required' => 'boolean', 'options' => 'array', 'createdAt' => 'datetime'];
+        return ['required' => 'boolean', 'options' => 'array', 'createdAt' => 'datetime', 'scaleMin' => 'integer', 'scaleMax' => 'integer'];
     }
 
     public function template(): BelongsTo

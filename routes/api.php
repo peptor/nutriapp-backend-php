@@ -6,6 +6,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FoodLibraryController;
+use App\Http\Controllers\MessagesController;
 use App\Http\Controllers\PatientsController;
 use App\Http\Controllers\RecordsController;
 use App\Http\Controllers\RoutinesController;
@@ -26,6 +27,7 @@ Route::prefix('auth')->middleware('throttle:20,15')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::put('/me', [AuthController::class, 'updateMe']);
         Route::post('/me/password', [AuthController::class, 'changePassword']);
+        Route::put('/me/notifications', [AuthController::class, 'updateNotifications'])->middleware('role:PACIENT');
         Route::get('/me/export', [AuthController::class, 'exportMe']);
         Route::delete('/me', [AuthController::class, 'deleteMe']);
     });
@@ -41,6 +43,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{id}', [PatientsController::class, 'update'])->middleware('role:NUTRICIONISTA');
         Route::post('/{id}/photo', [PatientsController::class, 'uploadPhoto'])->middleware('role:NUTRICIONISTA');
         Route::delete('/{id}/photo', [PatientsController::class, 'deletePhoto'])->middleware('role:NUTRICIONISTA');
+    });
+
+    // ——— Missatgeria interna (nutricionista <-> pacient) ———
+    Route::prefix('messages')->middleware('role:NUTRICIONISTA,PACIENT')->group(function () {
+        Route::get('/unread-count', [MessagesController::class, 'unreadCount']);
+        Route::get('/threads', [MessagesController::class, 'index']);
+        Route::post('/threads', [MessagesController::class, 'store'])->middleware('throttle:30,1');
+        Route::get('/threads/{id}', [MessagesController::class, 'show']);
+        Route::post('/threads/{id}/reply', [MessagesController::class, 'reply'])->middleware('throttle:60,1');
+        Route::get('/{id}/attachment', [MessagesController::class, 'attachment']);
     });
 
     // ——— Appointments ———

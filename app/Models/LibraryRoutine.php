@@ -18,11 +18,11 @@ class LibraryRoutine extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = null;
 
-    protected $fillable = ['slug', 'name', 'description', 'objective', 'category', 'tags', 'durationDays', 'caution', 'sourceName', 'sourceUrl', 'iconId'];
+    protected $fillable = ['slug', 'name', 'description', 'objective', 'category', 'tags', 'durationDays', 'caution', 'sourceName', 'sourceUrl', 'clinicalSources', 'iconId'];
 
     protected function casts(): array
     {
-        return ['createdAt' => 'datetime', 'durationDays' => 'integer'];
+        return ['createdAt' => 'datetime', 'durationDays' => 'integer', 'clinicalSources' => 'array'];
     }
 
     public function icon(): BelongsTo

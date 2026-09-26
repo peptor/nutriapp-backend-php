@@ -17,7 +17,7 @@ class FieldLibraryItem extends Model
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = null;
 
-    protected $fillable = ['createdById', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'helpText'];
+    protected $fillable = ['createdById', 'name', 'label', 'fieldType', 'frequency', 'required', 'options', 'helpText', 'scaleMin', 'scaleMax'];
 
     protected function casts(): array
     {
@@ -25,6 +25,8 @@ class FieldLibraryItem extends Model
             'required' => 'boolean',
             'options' => 'array',
             'createdAt' => 'datetime',
+            'scaleMin' => 'integer',
+            'scaleMax' => 'integer',
         ];
     }
 

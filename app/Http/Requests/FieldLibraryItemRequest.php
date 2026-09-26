@@ -22,6 +22,8 @@ class FieldLibraryItemRequest extends FormRequest
             'required' => ['sometimes', 'boolean'],
             'options' => ['nullable'],
             'helpText' => ['nullable', 'string', 'max:500'],
+            'scaleMin' => ['nullable', 'integer', 'min:0', 'max:99'],
+            'scaleMax' => ['nullable', 'integer', 'min:1', 'max:100', 'gt:scaleMin'],
         ];
     }
 }

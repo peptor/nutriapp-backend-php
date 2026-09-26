@@ -6,26 +6,25 @@ use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
-class RoutineAssignment extends Model
+class MessageThread extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $table = 'reg_routine_assignments';
+    protected $table = 'reg_message_threads';
 
     public static $snakeAttributes = false;
 
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['patientId', 'templateId', 'startDate', 'endDate', 'status', 'evolutionRating', 'completedAt', 'customNotes'];
+    protected $fillable = ['patientId', 'subject', 'lastMessageAt'];
 
     protected function casts(): array
     {
         return [
-            'startDate' => 'date:Y-m-d',
-            'endDate' => 'date:Y-m-d',
-            'completedAt' => 'datetime',
+            'lastMessageAt' => 'datetime',
             'createdAt' => 'datetime',
             'updatedAt' => 'datetime',
         ];
@@ -36,13 +35,13 @@ class RoutineAssignment extends Model
         return $this->belongsTo(Patient::class, 'patientId');
     }
 
-    public function template(): BelongsTo
+    public function messages(): HasMany
     {
-        return $this->belongsTo(RoutineTemplate::class, 'templateId');
+        return $this->hasMany(Message::class, 'threadId');
     }
 
-    public function records(): HasMany
+    public function latestMessage(): HasOne
     {
-        return $this->hasMany(DailyRecord::class, 'assignmentId');
+        return $this->hasOne(Message::class, 'threadId')->latestOfMany('createdAt');
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Validation\Rule;
 
 class UpdateRoutineTemplateRequest extends FormRequest
@@ -33,10 +34,24 @@ class UpdateRoutineTemplateRequest extends FormRequest
             'fields.*.orderIndex' => ['sometimes', 'integer', 'min:0'],
             'fields.*.goodDirection' => ['nullable', Rule::in(['LOW', 'HIGH'])],
             'fields.*.unit' => ['nullable', 'string', 'max:20'],
+            'fields.*.helpText' => ['nullable', 'string', 'max:300'],
+            'fields.*.scaleMin' => ['nullable', 'integer', 'min:0', 'max:99'],
+            'fields.*.scaleMax' => ['nullable', 'integer', 'min:1', 'max:100'],
             'foods' => ['sometimes', 'array'],
             'foods.*.foodId' => ['required', 'uuid'],
             'foods.*.use' => ['required', Rule::in(['RECOMMENDED', 'LIMIT', 'AVOID'])],
             'foods.*.note' => ['nullable', 'string', 'max:500'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            foreach ((array) $this->input('fields', []) as $idx => $field) {
+                if (($field['fieldType'] ?? null) === 'SCALE' && (int) ($field['scaleMax'] ?? 10) <= (int) ($field['scaleMin'] ?? 0)) {
+                    $validator->errors()->add("fields.$idx.scaleMax", 'El màxim ha de ser més gran que el mínim');
+                }
+            }
+        });
     }
 }

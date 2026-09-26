@@ -32,9 +32,12 @@ class FieldValueValidator
         }
 
         if ($field['fieldType'] === 'SCALE') {
-            return (self::isValidNonNegativeNumber($value) && (float) $value <= 10)
+            $min = (int) ($field['scaleMin'] ?? 0);
+            $max = (int) ($field['scaleMax'] ?? 10);
+
+            return (self::isValidNonNegativeNumber($value) && (float) $value >= $min && (float) $value <= $max)
                 ? null
-                : "\"$label\" ha d'estar entre 0 i 10";
+                : "\"$label\" ha d'estar entre $min i $max";
         }
 
         if ($field['fieldType'] === 'BLOOD_PRESSURE') {

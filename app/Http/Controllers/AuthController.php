@@ -37,6 +37,7 @@ class AuthController extends Controller
             'phone' => $user->phone,
             'avatarUrl' => UrlHelper::toAbsoluteUrl($avatarUrl),
             'brandingTheme' => $user->role === 'NUTRICIONISTA' ? ($user->nutricionistaProfile?->brandingTheme ?? 'original') : 'original',
+            'notifyMessagesByEmail' => (bool) $user->notifyMessagesByEmail,
         ];
     }
 
@@ -184,6 +185,16 @@ class AuthController extends Controller
         }
 
         $current->update(array_intersect_key($data, array_flip(['name', 'email', 'phone'])));
+
+        return response()->json($this->publicUser($current->fresh()));
+    }
+
+    // Preferències de notificació del pacient (avís per correu de missatges nous).
+    public function updateNotifications(Request $request)
+    {
+        $data = $request->validate(['notifyMessagesByEmail' => ['required', 'boolean']]);
+        $current = $request->user();
+        $current->update(['notifyMessagesByEmail' => $data['notifyMessagesByEmail']]);
 
         return response()->json($this->publicUser($current->fresh()));
     }
