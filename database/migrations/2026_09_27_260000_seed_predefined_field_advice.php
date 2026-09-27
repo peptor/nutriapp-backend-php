@@ -9,29 +9,55 @@ use Illuminate\Support\Str;
 // clínic de la biblioteca), no és una detecció automàtica ni necessita els mateixos llindars que les alertes.
 // S'apliquen a `mst_library_field_advice` i, per als ja creats des d'aquesta rutina, també als seus
 // `mst_routine_fields` (localitzats per `sourceLibraryFieldId`, ja establert per la migració 2026_09_27_150000).
+//
+// Els camps es localitzen per (nom de la rutina, nom del camp) — no per id: l'id d'un
+// `mst_library_routine_fields` no és el mateix a cada entorn (es genera en sembrar la biblioteca), així que un id
+// fixat aquí només funciona a l'entorn on es va escriure la migració (28/09/2026: va fallar a producció per
+// aquest motiu, amb un id que només existia al dev local). Mateix criteri que 2026_09_26_130000.
 return new class extends Migration
 {
     private const ADVICE = [
-        // libraryRoutineFieldId => [operator, thresholdValue, message]
-        '5884ec0e-32d6-46f6-82b5-495900bac9f3' => ['GTE', 7, 'Recorda anotar què has menjat durant les hores anteriors per poder revisar-ho a la propera visita.'], // Celiaquia · symptoms
-        '040f1a5e-9dc1-4d34-ae3a-e090fe40c60b' => ['LT', 1.5, "Avui has registrat poca ingesta d'aigua. Recorda mantenir una hidratació adequada."], // Esportiva · hydration
-        'cfc490e8-a9e4-4624-9a3e-fddd40bc7a4a' => ['GTE', 7, "La cremor d'avui ha estat intensa. Evita ajeure't just després de menjar i revisa si hi ha algun aliment que et sol desencadenar-la."], // RGE · heartburn
-        '45898388-70af-4612-b4cb-fb9bbf84d8ee' => ['GTE', 7, 'El dolor d\'avui ha estat alt. Si es repeteix els propers dies, comenta-ho amb el teu nutricionista.'], // Restrenyiment · pain
-        'f0f15859-f122-4613-be26-fb623ad112bb' => ['GTE', 7, 'Avui has notat molta inflor. Anota quins aliments has provat recentment per repassar-ho a la propera revisió.'], // SII · bloating
-        'ffb3a0d8-0295-470c-b74c-9f282c5b7fea' => ['GTE', 2, "Avui hi ha hagut més begudes ensucrades del compte. Prova d'oferir aigua com a primera opció."], // Pediatria · sugary_drinks
-        '621bb0f3-1fd2-45ad-a08a-c07e6869f0bd' => ['LT', 1, "Avui gairebé no has pres greixos saludables. Prova d'afegir-hi un raig d'oli d'oliva o un grapat de fruits secs."], // Colesterol · healthy_fats
+        ['routine' => 'Celiaquia%', 'field' => 'symptoms', 'operator' => 'GTE', 'threshold' => 7, 'message' => 'Recorda anotar què has menjat durant les hores anteriors per poder revisar-ho a la propera visita.'],
+        ['routine' => 'Nutrició esportiva%', 'field' => 'hydration', 'operator' => 'LT', 'threshold' => 1.5, 'message' => "Avui has registrat poca ingesta d'aigua. Recorda mantenir una hidratació adequada."],
+        ['routine' => 'Reflux gastroesofàgic%', 'field' => 'heartburn', 'operator' => 'GTE', 'threshold' => 7, 'message' => "La cremor d'avui ha estat intensa. Evita ajeure't just després de menjar i revisa si hi ha algun aliment que et sol desencadenar-la."],
+        ['routine' => '%restrenyiment%', 'field' => 'pain', 'operator' => 'GTE', 'threshold' => 7, 'message' => 'El dolor d\'avui ha estat alt. Si es repeteix els propers dies, comenta-ho amb el teu nutricionista.'],
+        ['routine' => 'SII%', 'field' => 'bloating', 'operator' => 'GTE', 'threshold' => 7, 'message' => 'Avui has notat molta inflor. Anota quins aliments has provat recentment per repassar-ho a la propera revisió.'],
+        ['routine' => 'Pediatria%', 'field' => 'sugary_drinks', 'operator' => 'GTE', 'threshold' => 2, 'message' => "Avui hi ha hagut més begudes ensucrades del compte. Prova d'oferir aigua com a primera opció."],
+        ['routine' => 'Control de colesterol%', 'field' => 'healthy_fats', 'operator' => 'LT', 'threshold' => 1, 'message' => "Avui gairebé no has pres greixos saludables. Prova d'afegir-hi un raig d'oli d'oliva o un grapat de fruits secs."],
     ];
+
+    private function libraryFieldId(string $routineNameLike, string $fieldName): ?string
+    {
+        $routineId = DB::table('mst_library_routines')->where('name', 'like', $routineNameLike)->value('id');
+        if (! $routineId) {
+            return null;
+        }
+
+        return DB::table('mst_library_routine_fields')->where('libraryRoutineId', $routineId)->where('name', $fieldName)->value('id');
+    }
 
     public function up(): void
     {
-        foreach (self::ADVICE as $libraryFieldId => [$operator, $threshold, $message]) {
+        foreach (self::ADVICE as $rule) {
+            $libraryFieldId = $this->libraryFieldId($rule['routine'], $rule['field']);
+            if (! $libraryFieldId) {
+                // Rutina o camp no sembrats en aquest entorn: se salta sense trencar el desplegament.
+                continue;
+            }
+            if (DB::table('mst_library_field_advice')->where('libraryRoutineFieldId', $libraryFieldId)->exists()) {
+                // Idempotent: a producció el primer intent (amb l'id fixat de l'entorn local, ja corregit més
+                // amunt) va fallar a mig fer i va deixar 5 de les 7 regles ja inserides (28/09/2026). Sense
+                // aquesta comprovació, tornar a desplegar les duplicaria en lloc de només afegir les que falten.
+                continue;
+            }
+
             $libraryAdviceId = (string) Str::uuid();
             DB::table('mst_library_field_advice')->insert([
                 'id' => $libraryAdviceId,
                 'libraryRoutineFieldId' => $libraryFieldId,
-                'operator' => $operator,
-                'thresholdValue' => $threshold,
-                'message' => $message,
+                'operator' => $rule['operator'],
+                'thresholdValue' => $rule['threshold'],
+                'message' => $rule['message'],
                 'orderIndex' => 0,
                 'createdAt' => now(),
             ]);
@@ -41,9 +67,9 @@ return new class extends Migration
                 DB::table('mst_routine_field_advice')->insert([
                     'id' => (string) Str::uuid(),
                     'routineFieldId' => $routineFieldId,
-                    'operator' => $operator,
-                    'thresholdValue' => $threshold,
-                    'message' => $message,
+                    'operator' => $rule['operator'],
+                    'thresholdValue' => $rule['threshold'],
+                    'message' => $rule['message'],
                     'orderIndex' => 0,
                     'sourceLibraryAdviceId' => $libraryAdviceId,
                     'createdAt' => now(),
@@ -54,9 +80,11 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::table('mst_routine_field_advice')->whereIn('sourceLibraryAdviceId', function ($q) {
-            $q->select('id')->from('mst_library_field_advice')->whereIn('libraryRoutineFieldId', array_keys(self::ADVICE));
+        $libraryFieldIds = array_filter(array_map(fn (array $rule) => $this->libraryFieldId($rule['routine'], $rule['field']), self::ADVICE));
+
+        DB::table('mst_routine_field_advice')->whereIn('sourceLibraryAdviceId', function ($q) use ($libraryFieldIds) {
+            $q->select('id')->from('mst_library_field_advice')->whereIn('libraryRoutineFieldId', $libraryFieldIds);
         })->delete();
-        DB::table('mst_library_field_advice')->whereIn('libraryRoutineFieldId', array_keys(self::ADVICE))->delete();
+        DB::table('mst_library_field_advice')->whereIn('libraryRoutineFieldId', $libraryFieldIds)->delete();
     }
 };
