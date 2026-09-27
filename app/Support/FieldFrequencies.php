@@ -11,6 +11,37 @@ use Illuminate\Support\Facades\DB;
 class FieldFrequencies
 {
     private static ?array $byTemplate = null;
+    private static ?array $adherenceByTemplate = null;
+
+    /**
+     * Com es compta l'adherència d'una plantilla i quins camps hi compten (columna `countsForAdherence`):
+     * - 'days': hi ha camps que compten i no tots són setmanals; un dia compta si hi ha registre d'un camp que
+     *   compta i no és setmanal (un camp setmanal mai no és un "dia registrat").
+     * - 'weeks': tots els camps que compten són setmanals; es compten setmanes (blocs de 7 dies) amb registre.
+     * - 'none': cap camp compta; no hi ha adherència (0 %, sense dades).
+     *
+     * @return array{mode: 'days'|'weeks'|'none', counted: string[]}
+     */
+    public static function adherenceFor(string $templateId): array
+    {
+        if (self::$adherenceByTemplate === null) {
+            self::$adherenceByTemplate = [];
+            $fields = [];
+            foreach (DB::table('mst_routine_fields')->get(['templateId', 'name', 'frequency', 'countsForAdherence']) as $field) {
+                if ($field->countsForAdherence) {
+                    $fields[$field->templateId][] = $field;
+                }
+            }
+            foreach ($fields as $tid => $counting) {
+                $daily = array_values(array_filter($counting, fn ($f) => $f->frequency !== 'weekly'));
+                self::$adherenceByTemplate[$tid] = $daily !== []
+                    ? ['mode' => 'days', 'counted' => array_map(fn ($f) => $f->name, $daily)]
+                    : ['mode' => 'weeks', 'counted' => array_map(fn ($f) => $f->name, $counting)];
+            }
+        }
+
+        return self::$adherenceByTemplate[$templateId] ?? ['mode' => 'none', 'counted' => []];
+    }
 
     /**
      * @return array{weekly: string[], allWeekly: bool}

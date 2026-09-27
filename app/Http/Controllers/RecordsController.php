@@ -7,6 +7,8 @@ use App\Http\Requests\DailyRecordRequest;
 use App\Models\DailyRecord;
 use App\Models\RoutineAssignment;
 use App\Support\AccessLogger;
+use App\Support\AdviceGenerator;
+use App\Support\AlertGenerator;
 use App\Support\FieldFrequencies;
 use App\Support\FieldValueValidator;
 use Illuminate\Http\Request;
@@ -102,6 +104,9 @@ class RecordsController extends Controller
             $this->replaceWeeklyValue($assignment, $data['fieldName'], $date);
         }
 
+        AlertGenerator::sync($assignment);
+        AdviceGenerator::sync($assignment);
+
         return response()->json($record, 201);
     }
 
@@ -163,6 +168,9 @@ class RecordsController extends Controller
 
             return $record;
         })->values();
+
+        AlertGenerator::sync($assignment);
+        AdviceGenerator::sync($assignment);
 
         return response()->json($results, 201);
     }

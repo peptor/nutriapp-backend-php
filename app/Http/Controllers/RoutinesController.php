@@ -15,9 +15,12 @@ use App\Models\LibraryRoutine;
 use App\Models\Patient;
 use App\Models\RoutineAssignment;
 use App\Models\RoutineField;
+use App\Models\RoutineFieldAdvice;
 use App\Models\RoutineInstruction;
 use App\Models\RoutineTemplate;
 use App\Models\RoutineTemplateFood;
+use App\Support\ClinicalProgress;
+use App\Support\FieldRules;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Database\Eloquent\Builder;
@@ -34,6 +37,7 @@ class RoutinesController extends Controller
             'icon',
             'fields' => fn ($q) => $q->orderBy('orderIndex'),
             'fields.fieldIcon',
+            'fields.advice',
             'instructions' => fn ($q) => $q->orderBy('orderIndex'),
             'foods.food.category',
         ])->orderBy('name')->get();
@@ -131,17 +135,27 @@ class RoutinesController extends Controller
     {
         $items = FieldLibraryItem::where(function ($q) use ($request) {
             $q->whereNull('createdById')->orWhere('createdById', $request->user()->id);
-        })->orderByRaw('createdById IS NOT NULL')->orderBy('label')->get();
+        })->with('fieldIcon:id,key,label,colorToken,imageUrl')->orderByRaw('createdById IS NOT NULL')->orderBy('label')->get();
 
         return response()->json($items);
     }
 
-    // Desa un camp propi a la biblioteca perquè es pugui reutilitzar en futures rutines.
+    // Marca un camp com a favorit: es desa a la biblioteca només per a aquest nutricionista.
+    // Si ja en té un amb el mateix nom, se n'actualitza la definició en lloc de duplicar-lo.
     public function fieldLibraryStore(FieldLibraryItemRequest $request)
     {
-        $item = FieldLibraryItem::create([...$request->validated(), 'createdById' => $request->user()->id]);
+        $userId = $request->user()->id;
+        $data = $request->validated();
+        $existing = FieldLibraryItem::where('createdById', $userId)->where('name', $data['name'])->first();
 
-        return response()->json($item, 201);
+        if ($existing) {
+            $existing->update($data);
+            $item = $existing;
+        } else {
+            $item = FieldLibraryItem::create([...$data, 'createdById' => $userId]);
+        }
+
+        return response()->json($item->load('fieldIcon:id,key,label,colorToken,imageUrl'), $existing ? 200 : 201);
     }
 
     // Elimina un camp propi de la biblioteca (els camps globals no es poden eliminar).
@@ -162,7 +176,7 @@ class RoutinesController extends Controller
     // Converteix una rutina de biblioteca en una plantilla privada editable.
     public function templateFromLibrary(Request $request, string $libraryId)
     {
-        $library = LibraryRoutine::with(['fields', 'instructions', 'foods'])->find($libraryId);
+        $library = LibraryRoutine::with(['fields', 'fields.advice', 'instructions', 'foods'])->find($libraryId);
         if (! $library) {
             return response()->json(['error' => 'Rutina de biblioteca no trobada'], 404);
         }
@@ -182,7 +196,7 @@ class RoutinesController extends Controller
             ]);
 
             foreach ($library->fields as $field) {
-                RoutineField::create([
+                $routineField = RoutineField::create([
                     'templateId' => $template->id,
                     'name' => $field->name,
                     'label' => $field->label,
@@ -197,7 +211,19 @@ class RoutinesController extends Controller
                     'unit' => $field->unit,
                     'helpText' => $field->helpText,
                     'orderIndex' => $field->orderIndex,
+                    'sourceLibraryFieldId' => $field->id,
+                    ...FieldRules::columnsFrom($field),
                 ]);
+                foreach ($field->advice as $advice) {
+                    RoutineFieldAdvice::create([
+                        'routineFieldId' => $routineField->id,
+                        'operator' => $advice->operator,
+                        'thresholdValue' => $advice->thresholdValue,
+                        'message' => $advice->message,
+                        'orderIndex' => $advice->orderIndex,
+                        'sourceLibraryAdviceId' => $advice->id,
+                    ]);
+                }
             }
             foreach ($library->instructions as $instruction) {
                 RoutineInstruction::create([
@@ -233,7 +259,7 @@ class RoutinesController extends Controller
         $nutricionistaId = $request->user()->id;
 
         $templates = RoutineTemplate::where(fn ($q) => $q->where('createdById', $nutricionistaId)->orWhere('isPublic', true))
-            ->with(['icon', 'fields' => fn ($q) => $q->orderBy('orderIndex'), 'foods.food.category'])
+            ->with(['icon', 'fields' => fn ($q) => $q->orderBy('orderIndex'), 'fields.advice', 'foods.food.category'])
             ->withCount([
                 'assignments as patientsCount' => fn ($q) => $q
                     ->join('sys_patients', 'sys_patients.id', '=', 'reg_routine_assignments.patientId')
@@ -272,7 +298,7 @@ class RoutinesController extends Controller
             ]);
 
             foreach (($data['fields'] ?? []) as $idx => $f) {
-                RoutineField::create([
+                $routineField = RoutineField::create([
                     'templateId' => $template->id,
                     'name' => $f['name'] ?? "camp_$idx",
                     'label' => $f['label'] ?? $f['name'],
@@ -287,7 +313,10 @@ class RoutinesController extends Controller
                     'helpText' => $f['helpText'] ?? null,
                     'scaleMin' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMin'] ?? 0) : 0,
                     'scaleMax' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMax'] ?? 10) : 10,
+                    'sourceLibraryFieldId' => $f['sourceLibraryFieldId'] ?? null,
+                    ...FieldRules::columnsFrom($f),
                 ]);
+                $this->saveFieldAdvice($routineField, $f['advice'] ?? []);
             }
             foreach (($data['foods'] ?? []) as $f) {
                 RoutineTemplateFood::create([
@@ -298,7 +327,7 @@ class RoutinesController extends Controller
                 ]);
             }
 
-            return $template->fresh(['fields', 'foods.food.category']);
+            return $template->fresh(['fields.advice', 'foods.food.category']);
         });
 
         return response()->json($template, 201);
@@ -322,7 +351,7 @@ class RoutinesController extends Controller
             if (array_key_exists('fields', $data)) {
                 RoutineField::where('templateId', $existing->id)->delete();
                 foreach (($data['fields'] ?? []) as $idx => $f) {
-                    RoutineField::create([
+                    $routineField = RoutineField::create([
                         'templateId' => $existing->id,
                         'name' => $f['name'] ?? "camp_$idx",
                         'label' => $f['label'] ?? $f['name'] ?? ('Camp '.($idx + 1)),
@@ -337,7 +366,10 @@ class RoutinesController extends Controller
                         'helpText' => $f['helpText'] ?? null,
                         'scaleMin' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMin'] ?? 0) : 0,
                         'scaleMax' => ($f['fieldType'] ?? null) === 'SCALE' ? (int) ($f['scaleMax'] ?? 10) : 10,
+                        'sourceLibraryFieldId' => $f['sourceLibraryFieldId'] ?? null,
+                        ...FieldRules::columnsFrom($f),
                     ]);
+                    $this->saveFieldAdvice($routineField, $f['advice'] ?? []);
                 }
             }
             if (array_key_exists('foods', $data)) {
@@ -352,7 +384,7 @@ class RoutinesController extends Controller
                 }
             }
 
-            return $existing->fresh(['fields' => fn ($q) => $q->orderBy('orderIndex'), 'foods.food.category']);
+            return $existing->fresh(['fields' => fn ($q) => $q->orderBy('orderIndex'), 'fields.advice', 'foods.food.category']);
         });
 
         return response()->json($template);
@@ -446,14 +478,24 @@ class RoutinesController extends Controller
                 'template.fields.fieldIcon',
                 'template.icon',
                 'template.foods.food.category',
-                'records:id,assignmentId,recordDate,fieldName',
+                'records:id,assignmentId,recordDate,fieldName,value',
             ])
             ->orderBy('startDate', 'desc')
             ->get();
 
         $today = Carbon::now()->startOfDay();
 
-        $result = $assignments->map(function (RoutineAssignment $a) use ($today) {
+        // Recordatoris (App\Support\RegisterReminders) d'aquesta setmana natural (dilluns-diumenge), per assignació.
+        $weekStart = $today->copy()->startOfWeek(Carbon::MONDAY);
+        $weekEnd = $today->copy()->endOfWeek(Carbon::SUNDAY);
+        $reminders = DB::table('reg_reminder_notices')
+            ->whereIn('assignmentId', $assignments->pluck('id'))
+            ->whereBetween('recordDate', [$weekStart->toDateString(), $weekEnd->toDateString()])
+            ->orderBy('recordDate')
+            ->get(['assignmentId', 'period', 'recordDate'])
+            ->groupBy('assignmentId');
+
+        $result = $assignments->map(function (RoutineAssignment $a) use ($today, $reminders) {
             $start = Carbon::parse($a->startDate)->startOfDay();
             $end = Carbon::parse($a->endDate)->startOfDay();
 
@@ -472,6 +514,11 @@ class RoutinesController extends Controller
             ];
             $array['computedStatus'] = $computedStatus;
             $array = array_merge($array, RoutineProgress::forAssignment($a));
+            $keyFields = $a->template->fields->where('isKeyField', true);
+            $array['trend'] = ClinicalProgress::of($a->startDate, $a->endDate, RoutineProgress::countedDates($a), $a->records, $keyFields);
+            $assignmentReminders = $reminders->get($a->id, collect());
+            $array['remindersThisWeek'] = $assignmentReminders->count();
+            $array['remindersThisWeekList'] = $assignmentReminders->map(fn ($r) => ['period' => $r->period, 'recordDate' => $r->recordDate])->values();
 
             return $array;
         });
@@ -524,5 +571,20 @@ class RoutinesController extends Controller
         $assignment->delete();
 
         return response()->json(['message' => 'Rutina eliminada correctament']);
+    }
+
+    // Consells del camp (App\Support\AdviceGenerator): es reemplacen sencers a cada desat, com la resta del camp.
+    private function saveFieldAdvice(RoutineField $routineField, array $advice): void
+    {
+        foreach ($advice as $aIdx => $a) {
+            RoutineFieldAdvice::create([
+                'routineFieldId' => $routineField->id,
+                'operator' => $a['operator'],
+                'thresholdValue' => in_array($a['operator'], ['YES', 'NO'], true) ? null : ($a['thresholdValue'] ?? null),
+                'message' => $a['message'],
+                'orderIndex' => $a['orderIndex'] ?? $aIdx,
+                'sourceLibraryAdviceId' => $a['sourceLibraryAdviceId'] ?? null,
+            ]);
+        }
     }
 }

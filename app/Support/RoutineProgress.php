@@ -7,33 +7,27 @@ use Illuminate\Support\Collection;
 
 // Adherència: dies amb registre sobre els dies ja transcorreguts de la rutina.
 // Completat: dies amb registre sobre el total de dies que dura la rutina (sencera).
-// Els registres de camps setmanals no compten com a dia registrat; si TOTS els camps de la rutina
-// són setmanals, es compten setmanes (blocs de 7 dies des de l'inici) en lloc de dies.
+// Només compten els camps amb `countsForAdherence` (vegeu FieldFrequencies::adherenceFor): els setmanals mai no
+// són un dia registrat; si tots els que compten són setmanals es compten setmanes; si cap compta, no hi ha adherència.
 class RoutineProgress
 {
     // Adherència d'una assignació amb els registres carregats (calen recordDate i fieldName).
     public static function forAssignment($assignment): array
     {
-        $frequencies = FieldFrequencies::forTemplate($assignment->templateId);
-
         return self::of(
             $assignment->startDate,
             $assignment->endDate,
             self::countedDates($assignment),
-            $frequencies['allWeekly'] ? 'weeks' : 'days'
+            FieldFrequencies::adherenceFor($assignment->templateId)['mode']
         );
     }
 
     // Dates de registre que compten per a l'adherència i la tendència.
     public static function countedDates($assignment): Collection
     {
-        $frequencies = FieldFrequencies::forTemplate($assignment->templateId);
-        $records = $assignment->records;
+        $counted = FieldFrequencies::adherenceFor($assignment->templateId)['counted'];
 
-        return ($frequencies['allWeekly']
-            ? $records
-            : $records->reject(fn ($record) => in_array($record->fieldName, $frequencies['weekly'], true))
-        )->pluck('recordDate');
+        return $assignment->records->filter(fn ($record) => in_array($record->fieldName, $counted, true))->pluck('recordDate');
     }
 
     /**
@@ -45,6 +39,13 @@ class RoutineProgress
         $end = CarbonImmutable::parse($endDate)->startOfDay();
         $today = CarbonImmutable::now('UTC')->startOfDay();
         $effectiveEnd = $today->lt($end) ? $today : $end;
+        // Cap camp compta per a l'adherència: no n'hi ha (0 %); la pantalla ho mostra sense dades.
+        if ($unit === 'none') {
+            $elapsed = max(1, $start->diffInDays($effectiveEnd) + 1);
+            $total = max(1, $start->diffInDays($end) + 1);
+
+            return ['adherencePercent' => 0, 'completedPercent' => 0, 'daysWithRecords' => 0, 'elapsedDays' => $elapsed, 'totalDays' => $total, 'progressUnit' => 'none'];
+        }
 
         $elapsedDays = max(1, $start->diffInDays($effectiveEnd) + 1);
         $totalDays = max(1, $start->diffInDays($end) + 1);

@@ -2,13 +2,17 @@
 
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AppointmentController;
+use App\Http\Controllers\AdviceController;
+use App\Http\Controllers\AlertsController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FoodLibraryController;
 use App\Http\Controllers\MessagesController;
 use App\Http\Controllers\PatientsController;
+use App\Http\Controllers\PushController;
 use App\Http\Controllers\RecordsController;
+use App\Http\Controllers\ReminderNoticesController;
 use App\Http\Controllers\RoutinesController;
 use App\Http\Controllers\ScheduleController;
 use Illuminate\Support\Facades\Route;
@@ -27,7 +31,7 @@ Route::prefix('auth')->middleware('throttle:20,15')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::put('/me', [AuthController::class, 'updateMe']);
         Route::post('/me/password', [AuthController::class, 'changePassword']);
-        Route::put('/me/notifications', [AuthController::class, 'updateNotifications'])->middleware('role:PACIENT');
+        Route::put('/me/notifications', [AuthController::class, 'updateNotifications'])->middleware('role:PACIENT,NUTRICIONISTA');
         Route::get('/me/export', [AuthController::class, 'exportMe']);
         Route::delete('/me', [AuthController::class, 'deleteMe']);
     });
@@ -95,6 +99,30 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/assignments/{id}/status', [RoutinesController::class, 'updateStatus'])->middleware('role:NUTRICIONISTA');
         Route::delete('/assignments/{id}', [RoutinesController::class, 'destroyAssignment'])->middleware('role:NUTRICIONISTA');
     });
+
+    // ——— Notificacions push: registre de dispositius (docs/com-funcionen-les-alertes.md) ———
+    Route::prefix('push')->middleware('role:NUTRICIONISTA,PACIENT')->group(function () {
+        Route::get('/config', [PushController::class, 'config']);
+        Route::get('/subscriptions', [PushController::class, 'index']);
+        Route::post('/subscriptions', [PushController::class, 'store']);
+        Route::delete('/subscriptions/{id}', [PushController::class, 'destroy']);
+    });
+
+    // ——— Alertes del nutricionista (docs/com-funcionen-les-alertes.md) ———
+    Route::prefix('alerts')->group(function () {
+        Route::get('/', [AlertsController::class, 'index'])->middleware('role:NUTRICIONISTA,PACIENT');
+        Route::get('/summary', [AlertsController::class, 'summary'])->middleware('role:NUTRICIONISTA,PACIENT');
+        Route::get('/today', [AlertsController::class, 'today'])->middleware('role:PACIENT');
+        Route::patch('/{id}/patient-seen', [AlertsController::class, 'patientSeen'])->middleware('role:PACIENT');
+        Route::patch('/{id}', [AlertsController::class, 'update'])->middleware('role:NUTRICIONISTA');
+    });
+
+    // ——— Consells disparats: avui (Avui del pacient) i l'històric d'una assignació (Evolució) ———
+    Route::get('/advice/today', [AdviceController::class, 'today'])->middleware('role:PACIENT');
+    Route::get('/advice', [AdviceController::class, 'index'])->middleware('role:NUTRICIONISTA,PACIENT');
+
+    // ——— Històric de recordatoris de registre d'una assignació (Evolució) ———
+    Route::get('/reminders', [ReminderNoticesController::class, 'index'])->middleware('role:NUTRICIONISTA,PACIENT');
 
     // ——— Biblioteca d'aliments: favorits i recents del picker (pacient, o el seu nutricionista) ———
     Route::prefix('food-library')->middleware('role:NUTRICIONISTA,PACIENT')->group(function () {

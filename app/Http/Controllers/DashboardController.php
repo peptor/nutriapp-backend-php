@@ -5,7 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Patient;
 use App\Models\RoutineAssignment;
 use App\Support\AccessLogger;
+use App\Support\AlertGenerator;
+use App\Support\ClinicalProgress;
 use App\Support\FieldFrequencies;
+use App\Support\FieldRules;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
@@ -29,32 +32,6 @@ class DashboardController extends Controller
             'phone' => $profile?->phone,
             'logoUrl' => UrlHelper::toAbsoluteUrl($profile?->logoUrl),
         ];
-    }
-
-    // Classificació de la pressió arterial segons l'edat del pacient (guies clíniques
-    // generals; per defecte -edat desconeguda- es fa servir la franja d'adult 18-64).
-    // Retorna null si els valors estan dins del rang de referència.
-    private function bloodPressureIncidence(float $sys, float $dia, ?int $age): ?array
-    {
-        if ($age !== null && $age <= 5) {
-            return ($sys > 110 || $dia > 79) ? ['severity' => 'HIGH', 'reference' => '≤ 110 / 79 mmHg'] : null;
-        }
-        if ($age !== null && $age <= 13) {
-            return ($sys > 115 || $dia > 80) ? ['severity' => 'HIGH', 'reference' => '≤ 115 / 80 mmHg'] : null;
-        }
-        if ($age !== null && $age >= 80) {
-            if ($sys > 150) {
-                return ['severity' => 'HIGH', 'reference' => '140 – 150 / > 70 mmHg'];
-            }
-
-            return $dia < 70 ? ['severity' => 'LOW', 'reference' => '140 – 150 / > 70 mmHg'] : null;
-        }
-        if ($age !== null && $age >= 65) {
-            return ($sys >= 140 || $dia >= 90) ? ['severity' => 'HIGH', 'reference' => '< 140 / 90 mmHg'] : null;
-        }
-
-        // Adults (18-64 anys) i per defecte quan no es coneix l'edat del pacient.
-        return ($sys >= 130 || $dia >= 85) ? ['severity' => 'HIGH', 'reference' => '< 130 / 85 mmHg'] : null;
     }
 
     // Nutricionista overview
@@ -141,16 +118,12 @@ class DashboardController extends Controller
 
         // Adherència: els registres de camps setmanals no compten com a dia registrat; si tots els
         // camps de la rutina són setmanals es compten setmanes (veure RoutineProgress).
-        $frequencies = FieldFrequencies::forTemplate($assignment->templateId);
-        $countedRecords = $frequencies['allWeekly']
-            ? $records
-            : $records->reject(fn ($r) => in_array($r->fieldName, $frequencies['weekly'], true));
-        $progress = RoutineProgress::of(
-            $assignment->startDate,
-            $assignment->endDate,
-            $countedRecords->pluck('recordDate'),
-            $frequencies['allWeekly'] ? 'weeks' : 'days'
-        );
+        $adherence = FieldFrequencies::adherenceFor($assignment->templateId);
+        $countedRecordDates = $records->filter(fn ($r) => in_array($r->fieldName, $adherence['counted'], true))->pluck('recordDate');
+        $progress = RoutineProgress::of($assignment->startDate, $assignment->endDate, $countedRecordDates, $adherence['mode']);
+        // Progrés clínic: ritme de registre + evolució dels valors dels camps clau. Vegeu App\Support\ClinicalProgress.
+        $keyFields = $assignment->template->fields->where('isKeyField', true);
+        $trend = ClinicalProgress::of($assignment->startDate, $assignment->endDate, $countedRecordDates, $records, $keyFields);
         $totalDays = $progress['elapsedDays'];
         $fullDurationDays = $progress['totalDays'];
         $daysWithRecords = $progress['daysWithRecords'];
@@ -172,56 +145,8 @@ class DashboardController extends Controller
         $fieldByName = $assignment->template->fields->keyBy('name');
         $labelOf = fn (string $name) => $fieldLabelByName[$name] ?? $name;
 
-        // Incidències: valors fora del rang recomanat. De moment només es detecten per a
-        // dos tipus de camp:
-        // - Escala (rang configurable, per defecte 0-10): només si el camp té una "direcció
-        //   bona" definida, perquè si no no sabem quin extrem és el preocupant. L'extrem
-        //   contrari a la direcció bona és el que es marca com a incidència: el 20% inferior
-        //   o el 20% superior del rang (0-2 o 8-10 en una escala 0-10).
-        // - Pressió arterial: segons l'edat del pacient (veure bloodPressureIncidence()).
-        $patientAge = $assignment->patient->birthDate ? Carbon::parse($assignment->patient->birthDate)->age : null;
-        $incidencies = $records
-            ->map(function ($r) use ($fieldTypeByName, $fieldGoodDirectionByName, $fieldByName, $labelOf, $patientAge) {
-                $fieldType = $fieldTypeByName[$r->fieldName] ?? null;
-                $date = Carbon::parse($r->recordDate)->toDateString();
-                $field = $labelOf($r->fieldName);
-
-                if ($fieldType === 'SCALE' && is_numeric($r->value)) {
-                    $value = (float) $r->value;
-                    $direction = $fieldGoodDirectionByName[$r->fieldName] ?? null;
-                    $scaleMin = (int) ($fieldByName[$r->fieldName]->scaleMin ?? 0);
-                    $scaleMax = (int) ($fieldByName[$r->fieldName]->scaleMax ?? 10);
-                    $span = $scaleMax - $scaleMin;
-                    $highFrom = $scaleMin + intdiv(8 * $span + 9, 10); // primer valor del 20% superior
-                    $lowTo = $scaleMin + intdiv(2 * $span, 10); // últim valor del 20% inferior
-                    if ($direction === 'LOW' && $value >= $highFrom) {
-                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'HIGH', 'reference' => $scaleMin.' – '.($highFrom - 1)];
-                    }
-                    if ($direction === 'HIGH' && $value <= $lowTo) {
-                        return ['date' => $date, 'field' => $field, 'value' => $r->value, 'severity' => 'LOW', 'reference' => ($lowTo + 1).' – '.$scaleMax];
-                    }
-
-                    return null;
-                }
-
-                if ($fieldType === 'BLOOD_PRESSURE' && is_array($r->value)) {
-                    $sys = is_numeric($r->value['tensio_sistolica'] ?? null) ? (float) $r->value['tensio_sistolica'] : null;
-                    $dia = is_numeric($r->value['tensio_diastolica'] ?? null) ? (float) $r->value['tensio_diastolica'] : null;
-                    if ($sys === null || $dia === null) {
-                        return null;
-                    }
-                    $bp = $this->bloodPressureIncidence($sys, $dia, $patientAge);
-                    if ($bp === null) {
-                        return null;
-                    }
-
-                    return ['date' => $date, 'field' => $field, 'value' => "{$r->value['tensio_sistolica']} / {$r->value['tensio_diastolica']}", 'severity' => $bp['severity'], 'reference' => $bp['reference']];
-                }
-
-                return null;
-            })
-            ->filter()
-            ->values();
+        // Incidències (valors fora de rang): vegeu App\Support\AlertGenerator i docs/com-funcionen-les-alertes.md.
+        $incidencies = AlertGenerator::incidents($assignment, $records);
 
         // Camps NUMBER (a diferència de SCALE/BOOLEAN/BLOOD_PRESSURE/TEXT/MEAL) que
         // tendeixen a pujar: primer i últim valor registrat en el període.
@@ -238,6 +163,10 @@ class DashboardController extends Controller
             ->filter();
 
         $puntsARevisar = [];
+        $urgents = $incidencies->where('level', 'URGENT');
+        if ($urgents->isNotEmpty()) {
+            $puntsARevisar[] = "{$urgents->count()} alerta".($urgents->count() === 1 ? '' : 's').' urgent'.($urgents->count() === 1 ? '' : 's').' ('.$urgents->pluck('field')->unique()->join(', ').'). Revisar-les primer.';
+        }
         if ($adherencePercent < 60) {
             $puntsARevisar[] = "Adherència baixa ($adherencePercent%). Valorar obstacles o simplificar la rutina.";
         }
@@ -288,6 +217,7 @@ class DashboardController extends Controller
             'professional' => $this->professionalOf($assignment->patient->nutricionista),
             'adherencePercent' => $adherencePercent,
             'completedPercent' => $completedPercent,
+            'trend' => $trend,
             'daysWithRecords' => $daysWithRecords,
             'totalDays' => $totalDays,
             'fullDurationDays' => $fullDurationDays,

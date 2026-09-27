@@ -12,8 +12,10 @@ Laravel 13, PHP 8.3+, Sanctum, MySQL (BD local de desenvolupament: `nutricion_ru
 - Validació d'entrada a `app/Http/Requests`. Els tipus de camp de rutina (`fieldType`) s'enumeren a tres requests (crear plantilla, actualitzar plantilla, camp de biblioteca) i a l'`enum` de les taules de camps: afegir-ne un implica tocar-ho tot.
 - La validació dels valors dels registres és a `app/Support/FieldValueValidator.php` i té un mirall al frontend (`frontend/src/lib/fieldValues.ts`): si en canvies un, canvia l'altre.
 - Els missatges que veu l'usuari, en català.
-- Camps de rutina setmanals (`frequency = 'weekly'`): un valor per bloc de 7 dies des de l'inici de la rutina (`App\Support\FieldFrequencies`). No bloquegen el desat diari, no compten com a dia registrat a l'adherència (`RoutineProgress`) i, si TOTS els camps d'una rutina són setmanals, l'adherència es compta en setmanes.
+- Camps de rutina setmanals (`frequency = 'weekly'`): un valor per bloc de 7 dies des de l'inici de la rutina (`App\Support\FieldFrequencies`). No bloquegen el desat diari i mai no són un dia registrat.
+- L'adherència (`RoutineProgress`, dashboard, llistes) només té en compte els camps amb `countsForAdherence` (`FieldFrequencies::adherenceFor`): per dies si n'hi ha de diaris; per setmanes si tots els que compten són setmanals; si cap compta, `progressUnit = 'none'`. El frontend ho reflecteix a `adherenceOf` (`lib/fieldRules.ts`): si es canvia una regla, canviar-la als dos llocs.
 - Els camps de la biblioteca tenen `goodDirection`, `unit`, `helpText` i rang d'escala (`scaleMin`/`scaleMax`); `templateFromLibrary` els copia tots: si s'afegeix una columna a la biblioteca, cal copiar-la allà.
+- Les regles d'alerta/tendència/adherència d'un camp són les columnes de `App\Support\FieldRules::COLUMNS` (trait `HasRuleColumns` als tres models de camp). Una columna nova de regla s'afegeix a `FieldRules::COLUMNS`/`CASTS`/`requestRules`, a la migració de les tres taules i al frontend (`lib/fieldRules.ts`, `lib/validators.ts`, `FieldRulesEditor`). Disseny i estat: `docs/disseny-migracions-regles-camps.md`.
 
 ## Verificació
 - `php -l <fitxer>` per a la sintaxi; `php artisan migrate:status` abans de migrar. Es pot migrar la BD local; a producció només arriba amb el deploy.

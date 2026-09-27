@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasRuleColumns;
 use App\Models\Concerns\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LibraryRoutineField extends Model
 {
+    use HasRuleColumns;
     use HasUuidPrimaryKey;
 
     protected $table = 'mst_library_routine_fields';
@@ -31,5 +34,10 @@ class LibraryRoutineField extends Model
     public function fieldIcon(): BelongsTo
     {
         return $this->belongsTo(FieldIcon::class, 'fieldIconId');
+    }
+
+    public function advice(): HasMany
+    {
+        return $this->hasMany(LibraryFieldAdvice::class, 'libraryRoutineFieldId')->orderBy('orderIndex');
     }
 }

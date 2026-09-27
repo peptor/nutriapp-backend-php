@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+
+    // Web Push (notificacions push de la PWA). Genera les claus amb `php artisan push:generate-keys`.
+    'webpush' => [
+        'public_key' => env('VAPID_PUBLIC_KEY'),
+        'private_key' => env('VAPID_PRIVATE_KEY'),
+        'subject' => env('VAPID_SUBJECT'),
+    ],
+
 ];

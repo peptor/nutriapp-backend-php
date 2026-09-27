@@ -7,7 +7,7 @@ use App\Http\Requests\UpdatePatientRequest;
 use App\Models\Patient;
 use App\Models\User;
 use App\Support\AccessLogger;
-use App\Support\AssignmentTrend;
+use App\Support\ClinicalProgress;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
@@ -50,22 +50,26 @@ class PatientsController extends Controller
         $patients = Patient::where('nutricionistaId', $request->user()->id)
             ->with([
                 'user:id,name,email,phone',
-                'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'records:id,assignmentId,recordDate,fieldName']),
+                'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'template.fields', 'records:id,assignmentId,recordDate,fieldName,value']),
                 'appointments' => fn ($q) => $q->orderBy('startAt'),
             ])
             ->orderBy('createdAt', 'desc')
             ->get();
 
-        $result = $patients->map(function (Patient $patient) {
+        $alertCounts = $this->alertCounts($patients->flatMap(fn ($patient) => $patient->assignments->pluck('id')));
+
+        $result = $patients->map(function (Patient $patient) use ($alertCounts) {
             $array = $patient->toArray();
             unset($array['appointments']);
             $array['photoUrl'] = UrlHelper::toAbsoluteUrl($patient->photoUrl);
             $array = array_merge($array, $this->visitFields($patient));
-            $array['assignments'] = $patient->assignments->map(function ($assignment) {
+            $array['assignments'] = $patient->assignments->map(function ($assignment) use ($alertCounts) {
                 $data = $assignment->only(['id', 'patientId', 'templateId', 'startDate', 'endDate', 'status', 'customNotes', 'createdAt', 'updatedAt']);
                 $data['template'] = $assignment->template;
                 $data = array_merge($data, RoutineProgress::forAssignment($assignment));
-                $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment));
+                $keyFields = $assignment->template->fields->where('isKeyField', true);
+                $data['trend'] = ClinicalProgress::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment), $assignment->records, $keyFields);
+                $data['alerts'] = $alertCounts[$assignment->id] ?? ['urgent' => 0, 'review' => 0];
 
                 return $data;
             })->values();
@@ -157,6 +161,7 @@ class PatientsController extends Controller
         $patient = Patient::with([
             'user:id,name,email,phone',
             'assignments.template.icon',
+            'assignments.template.fields',
             'assignments.records' => fn ($q) => $q->orderBy('recordDate', 'desc'),
             'appointments' => fn ($q) => $q->orderBy('startAt'),
         ])->find($id);
@@ -187,10 +192,13 @@ class PatientsController extends Controller
         // L'adherència/tendència es calculen amb TOTS els registres (abans de limitar-los a
         // 50 per a la vista): si es fes amb la llista ja retallada, una assignació amb més de
         // 50 registres sortiria amb l'adherència infravalorada.
-        $array['assignments'] = $patient->assignments->map(function ($assignment) {
+        $alertCounts = $this->alertCounts($patient->assignments->pluck('id'));
+        $array['assignments'] = $patient->assignments->map(function ($assignment) use ($alertCounts) {
             $data = $assignment->toArray();
+            $data['alerts'] = $alertCounts[$assignment->id] ?? ['urgent' => 0, 'review' => 0];
             $data = array_merge($data, RoutineProgress::forAssignment($assignment));
-            $data['trend'] = AssignmentTrend::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment));
+            $keyFields = $assignment->template->fields->where('isKeyField', true);
+            $data['trend'] = ClinicalProgress::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment), $assignment->records, $keyFields);
             // Limitem a 50 registres per assignació en PHP (no amb ->limit() a l'eager load): Eloquent
             // implementaria el límit per relació amb ROW_NUMBER() OVER(...), que MariaDB (usat en
             // local) no gestiona bé combinat amb aquesta subconsulta ("Mixing of GROUP columns...").
@@ -279,5 +287,17 @@ class PatientsController extends Controller
         $patient->update(['photoUrl' => null]);
 
         return response()->json(['message' => 'Foto eliminada']);
+    }
+
+    // Alertes pendents (obertes o vistes) per assignació i nivell: {assignmentId: {urgent, review}}.
+    private function alertCounts($assignmentIds): array
+    {
+        $counts = [];
+        foreach (\App\Models\Alert::whereIn('assignmentId', $assignmentIds->all())->whereIn('status', ['OPEN', 'SEEN'])
+            ->selectRaw('assignmentId, level, count(*) as n')->groupBy('assignmentId', 'level')->get() as $row) {
+            $counts[$row->assignmentId][$row->level === 'URGENT' ? 'urgent' : 'review'] = (int) $row->n;
+        }
+
+        return array_map(fn ($c) => ['urgent' => $c['urgent'] ?? 0, 'review' => $c['review'] ?? 0], $counts);
     }
 }

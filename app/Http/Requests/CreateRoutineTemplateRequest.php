@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\FieldRules;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -32,16 +33,27 @@ class CreateRoutineTemplateRequest extends FormRequest
             'fields.*.required' => ['sometimes', 'boolean'],
             'fields.*.options' => ['nullable'],
             'fields.*.orderIndex' => ['sometimes', 'integer', 'min:0'],
-            'fields.*.goodDirection' => ['nullable', Rule::in(['LOW', 'HIGH'])],
+            ...FieldRules::requestRules('fields.*.'),
             'fields.*.unit' => ['nullable', 'string', 'max:20'],
             'fields.*.helpText' => ['nullable', 'string', 'max:300'],
             'fields.*.scaleMin' => ['nullable', 'integer', 'min:0', 'max:99'],
             'fields.*.scaleMax' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'fields.*.advice' => ['sometimes', 'array', 'max:10'],
+            'fields.*.advice.*.operator' => ['required', Rule::in(['GTE', 'GT', 'LTE', 'LT', 'EQ', 'YES', 'NO'])],
+            'fields.*.advice.*.thresholdValue' => ['nullable', 'numeric'],
+            'fields.*.advice.*.message' => ['required', 'string', 'max:300'],
+            'fields.*.advice.*.orderIndex' => ['sometimes', 'integer', 'min:0'],
+            'fields.*.advice.*.sourceLibraryAdviceId' => ['nullable', 'string'],
             'foods' => ['sometimes', 'array'],
             'foods.*.foodId' => ['required', 'uuid'],
             'foods.*.use' => ['required', Rule::in(['RECOMMENDED', 'LIMIT', 'AVOID'])],
             'foods.*.note' => ['nullable', 'string', 'max:500'],
         ];
+    }
+
+    public function messages(): array
+    {
+        return FieldRules::requestMessages('fields.*.');
     }
 
     public function withValidator(Validator $validator): void
@@ -53,6 +65,18 @@ class CreateRoutineTemplateRequest extends FormRequest
                 }
                 if (($field['fieldType'] ?? null) === 'SCALE' && (int) ($field['scaleMax'] ?? 10) <= (int) ($field['scaleMin'] ?? 0)) {
                     $validator->errors()->add("fields.$idx.scaleMax", 'El màxim ha de ser més gran que el mínim');
+                }
+                foreach (($field['advice'] ?? []) as $aIdx => $advice) {
+                    $numeric = in_array($advice['operator'] ?? null, ['GTE', 'GT', 'LTE', 'LT', 'EQ'], true);
+                    if ($numeric && ($advice['thresholdValue'] ?? null) === null) {
+                        $validator->errors()->add("fields.$idx.advice.$aIdx.thresholdValue", 'Cal un valor per a aquest operador');
+                    }
+                    if (! $numeric && ! in_array(($field['fieldType'] ?? null), ['BOOLEAN'], true)) {
+                        $validator->errors()->add("fields.$idx.advice.$aIdx.operator", "«Sí»/«No» només per a camps Sí/No");
+                    }
+                    if ($numeric && ! in_array(($field['fieldType'] ?? null), ['NUMBER', 'SCALE'], true)) {
+                        $validator->errors()->add("fields.$idx.advice.$aIdx.operator", 'Aquest operador només és per a camps numèrics o d’escala');
+                    }
                 }
             }
         });

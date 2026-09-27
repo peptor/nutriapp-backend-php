@@ -261,10 +261,10 @@ class MessagesController extends Controller
         return $message;
     }
 
-    // Avís genèric per correu (sense cap contingut del missatge) només si el pacient l'ha activat.
+    // Avís genèric per correu (sense cap contingut del missatge) només si el destinatari (pacient o nutricionista) l'ha activat.
     private function notify(User $recipient, User $sender, MessageThread $thread): void
     {
-        if ($recipient->role !== 'PACIENT' || ! $recipient->notifyMessagesByEmail || $recipient->deletedAt) {
+        if (! in_array($recipient->role, ['PACIENT', 'NUTRICIONISTA'], true) || ! $recipient->notifyMessagesByEmail || $recipient->deletedAt) {
             return;
         }
 
@@ -273,6 +273,7 @@ class MessagesController extends Controller
                 $recipient->name,
                 $sender->name,
                 rtrim(config('app.frontend_url'), '/').'/messages/'.$thread->id,
+                $recipient->language,
             ));
         } catch (\Throwable $e) {
             report($e);

@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Support\Translator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -17,22 +18,28 @@ class NewMessageMail extends Mailable
         public string $userName,
         public string $senderName,
         public string $messageUrl,
+        public ?string $language = null,
     ) {}
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Tens un missatge nou · NutriEvo');
+        return new Envelope(subject: Translator::t('new_message_subject', $this->language).' · NutriEvo');
     }
 
     public function content(): Content
     {
+        $lang = $this->language;
+
         return new Content(
             view: 'emails.new-message',
             with: [
-                'userName' => $this->userName,
-                'senderName' => $this->senderName,
+                'greeting' => Translator::t('greeting', $lang, ['name' => $this->userName ? ' '.$this->userName : '']),
+                'bodyText' => Translator::t('new_message_body', $lang, ['sender' => $this->senderName]),
+                'buttonLabel' => Translator::t('new_message_button', $lang),
+                'disableHint' => Translator::t('disable_hint_messages', $lang),
+                'footer' => Translator::t('footer_automated', $lang),
                 'messageUrl' => $this->messageUrl,
-                'logoUrl' => rtrim(config('app.frontend_url'), '/').'/icon-512.png',
+                'logoUrl' => Translator::logoUrl($lang),
             ],
         );
     }

@@ -35,9 +35,12 @@ class AuthController extends Controller
             'name' => $user->name,
             'role' => $user->role,
             'phone' => $user->phone,
+            'language' => $user->language,
             'avatarUrl' => UrlHelper::toAbsoluteUrl($avatarUrl),
             'brandingTheme' => $user->role === 'NUTRICIONISTA' ? ($user->nutricionistaProfile?->brandingTheme ?? 'original') : 'original',
             'notifyMessagesByEmail' => (bool) $user->notifyMessagesByEmail,
+            'notifyByPush' => (bool) $user->notifyByPush,
+            'notifyByEmailFallback' => (bool) $user->notifyByEmailFallback,
         ];
     }
 
@@ -139,7 +142,7 @@ class AuthController extends Controller
 
             $resetUrl = rtrim(config('app.frontend_url'), '/').'/reset-password?token='.$rawToken;
 
-            Mail::to($user->email)->send(new PasswordResetMail($user->name, $resetUrl, self::PASSWORD_RESET_EXPIRES_MINUTES));
+            Mail::to($user->email)->send(new PasswordResetMail($user->name, $resetUrl, self::PASSWORD_RESET_EXPIRES_MINUTES, $user->language));
         }
 
         return response()->json(['message' => "Si existeix un compte amb aquest correu, t'hem enviat un enllaç per restablir la contrasenya."]);
@@ -184,17 +187,26 @@ class AuthController extends Controller
             return response()->json(['error' => 'Email ja en ús'], 409);
         }
 
-        $current->update(array_intersect_key($data, array_flip(['name', 'email', 'phone'])));
+        $current->update(array_intersect_key($data, array_flip(['name', 'email', 'phone', 'language'])));
 
         return response()->json($this->publicUser($current->fresh()));
     }
 
-    // Preferències de notificació del pacient (avís per correu de missatges nous).
+    // Preferències de notificació: avís per correu de missatges nous, notificacions push i correu de fallback quan
+    // la push no arriba enlloc (pacient i nutricionista). En desautoritzar les push s'esborren els dispositius
+    // registrats (no es guarda res d'un dispositiu sense consentiment).
     public function updateNotifications(Request $request)
     {
-        $data = $request->validate(['notifyMessagesByEmail' => ['required', 'boolean']]);
+        $data = $request->validate([
+            'notifyMessagesByEmail' => ['sometimes', 'boolean'],
+            'notifyByPush' => ['sometimes', 'boolean'],
+            'notifyByEmailFallback' => ['sometimes', 'boolean'],
+        ]);
         $current = $request->user();
-        $current->update(['notifyMessagesByEmail' => $data['notifyMessagesByEmail']]);
+        $current->update($data);
+        if (array_key_exists('notifyByPush', $data) && ! $data['notifyByPush']) {
+            $current->pushSubscriptions()->delete();
+        }
 
         return response()->json($this->publicUser($current->fresh()));
     }

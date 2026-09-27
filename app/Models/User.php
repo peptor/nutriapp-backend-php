@@ -22,7 +22,7 @@ class User extends Authenticatable
     const CREATED_AT = 'createdAt';
     const UPDATED_AT = 'updatedAt';
 
-    protected $fillable = ['email', 'passwordHash', 'name', 'role', 'phone', 'deletedAt', 'notifyMessagesByEmail'];
+    protected $fillable = ['email', 'passwordHash', 'name', 'role', 'phone', 'language', 'deletedAt', 'notifyMessagesByEmail', 'notifyByPush', 'notifyByEmailFallback'];
 
     protected $hidden = ['passwordHash', 'remember_token'];
 
@@ -31,9 +31,17 @@ class User extends Authenticatable
         return [
             'deletedAt' => 'datetime',
             'notifyMessagesByEmail' => 'boolean',
+            'notifyByPush' => 'boolean',
+            'notifyByEmailFallback' => 'boolean',
             'createdAt' => 'datetime',
             'updatedAt' => 'datetime',
         ];
+    }
+
+    // Dispositius registrats per a notificacions push.
+    public function pushSubscriptions(): HasMany
+    {
+        return $this->hasMany(PushSubscription::class, 'userId');
     }
 
     // Pacients dels quals aquest usuari és el nutricionista responsable.
