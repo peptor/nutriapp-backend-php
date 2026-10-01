@@ -115,13 +115,22 @@ class AlertGenerator
         return ($sys >= 130 || $dia >= 85) ? ['severity' => 'HIGH', 'reference' => '< 130 / 85 mmHg'] : null;
     }
 
+    // Camp sentinella de les alertes MISSING_DAYS (reg_alerts.fieldName no és nul·lable i l'alerta no és d'un
+    // camp concret, és de tota l'assignació): mai coincideix amb el `name` real d'un camp.
+    public const MISSING_DAYS_FIELD = '__assignment__';
+
+    /** Dies seguits sense registrar perquè passi de recordatori (push) a alerta real al tauler. Veure SyncMissingDaysAlerts. */
+    public const MISSING_DAYS_THRESHOLD = 3;
+
     /**
-     * Posa al dia les alertes (reg_alerts) d'una assignació: crea les incidències noves, actualitza les existents
-     * (sense tocar-ne l'estat) i elimina les obertes o vistes que ja no ho són (un registre editat). Les resoltes es conserven.
-     * Les alertes URGENT noves envien un avís push (genèric, sense dades de salut) al nutricionista responsable
-     * i al mateix pacient (decisió "nivell 4" de docs/disseny-migracions-regles-camps.md), cadascun només si té
-     * les push autoritzades. Per ara totes les alertes es consideren de les dues audiències: encara falta decidir
-     * quines són només del nutricionista (docs/com-funcionen-les-alertes.md, secció 10).
+     * Posa al dia les alertes (reg_alerts) d'una assignació: crea les incidències noves (OUT_OF_RANGE/ALARM),
+     * actualitza les existents (sense tocar-ne l'estat) i elimina les obertes o vistes que ja no ho són (un
+     * registre editat). Les resoltes es conserven. També sincronitza TREND_WORSE (mateix càlcul que "Progrés
+     * clínic", camp a camp) i resol les MISSING_DAYS obertes (si hi ha un registre nou, el pacient ja ha tornat
+     * a registrar). Les alertes URGENT noves envien un avís push (genèric, sense dades de salut) al
+     * nutricionista responsable i al mateix pacient (decisió "nivell 4" de docs/disseny-migracions-regles-camps.md),
+     * cadascun només si té les push autoritzades. Per ara totes les alertes es consideren de les dues audiències:
+     * encara falta decidir quines són només del nutricionista (docs/com-funcionen-les-alertes.md, secció 10).
      */
     public static function sync(RoutineAssignment $assignment): void
     {
@@ -152,12 +161,18 @@ class AlertGenerator
             }
         }
 
-        Alert::where('assignmentId', $assignment->id)->whereIn('status', ['OPEN', 'SEEN'])->get()
+        // Només els tipus que surten de incidents() (OUT_OF_RANGE/ALARM, lligats a un registre concret d'un
+        // dia): TREND_WORSE i MISSING_DAYS tenen el seu propi cicle de vida més avall (syncTrendWorse,
+        // resolveMissingDays) — si entressin aquí, com que mai són a $keep, es tornarien a esborrar tot seguit.
+        Alert::where('assignmentId', $assignment->id)->whereIn('type', ['OUT_OF_RANGE', 'ALARM'])->whereIn('status', ['OPEN', 'SEEN'])->get()
             ->each(function (Alert $alert) use ($keep) {
                 if (! isset($keep[$alert->fieldName.'|'.$alert->recordDate->toDateString().'|'.$alert->type])) {
                     $alert->delete();
                 }
             });
+
+        self::syncTrendWorse($assignment, $records);
+        self::resolveMissingDays($assignment);
 
         if ($newUrgent > 0) {
             $pushSender = app(PushSender::class);
@@ -185,5 +200,71 @@ class AlertGenerator
     private static function typeOf(RoutineAssignment $assignment, string $fieldName): string
     {
         return ($assignment->template->fields->firstWhere('name', $fieldName)?->fieldType) === 'BOOLEAN' ? 'ALARM' : 'OUT_OF_RANGE';
+    }
+
+    // TREND_WORSE: mateix càlcul que App\Support\ClinicalProgress (mitjana dels últims 7 dies contra els 7
+    // anteriors, amb els llindars trendChangeAbs/trendChangePct si n'hi ha), però per a CADA camp avaluable de
+    // la rutina (no només els clau) — decisió de l'usuari (30/09/2026). Es repeteix com a molt un cop per
+    // setmana per camp (si ja n'hi ha una d'oberta, o se'n va crear una en els últims 7 dies, no se'n crea una
+    // altra); si el camp deixa de ser desfavorable, es tanca la que hi hagués oberta. Nivell REVIEW, sense push
+    // (decisió de l'usuari).
+    private static function syncTrendWorse(RoutineAssignment $assignment, Collection $records): void
+    {
+        $today = Carbon::today();
+        $last7From = $today->copy()->subDays(6);
+        $prev7To = $last7From->copy()->subDay();
+        $prev7From = $prev7To->copy()->subDays(6);
+        $recentSince = $today->copy()->subDays(6);
+
+        foreach ($assignment->template->fields as $field) {
+            if ($field->isSensitive) {
+                continue;
+            }
+
+            $worsening = ClinicalProgress::fieldScore($field, $records, $last7From, $today, $prev7From, $prev7To) === -1;
+
+            $open = Alert::where('assignmentId', $assignment->id)
+                ->where('fieldName', $field->name)
+                ->where('type', 'TREND_WORSE')
+                ->whereIn('status', ['OPEN', 'SEEN'])
+                ->first();
+
+            if (! $worsening) {
+                $open?->delete(); // Ja no és desfavorable: es tanca si n'hi havia una d'oberta.
+                continue;
+            }
+            if ($open) {
+                continue; // Ja n'hi ha una d'oberta per aquest camp.
+            }
+            $createdRecently = Alert::where('assignmentId', $assignment->id)
+                ->where('fieldName', $field->name)
+                ->where('type', 'TREND_WORSE')
+                ->where('createdAt', '>=', $recentSince)
+                ->exists();
+            if ($createdRecently) {
+                continue; // Ja se n'ha creat una (encara que ara estigui vista/resolta) en els últims 7 dies.
+            }
+
+            Alert::create([
+                'assignmentId' => $assignment->id,
+                'fieldName' => $field->name,
+                'recordDate' => $today->toDateString(),
+                'type' => 'TREND_WORSE',
+                'level' => 'REVIEW',
+                'severity' => 'HIGH',
+                'message' => mb_substr($field->label.': la tendència d\'aquesta setmana és desfavorable respecte a la setmana anterior.', 0, 300),
+            ]);
+        }
+    }
+
+    // MISSING_DAYS: la crea SyncMissingDaysAlerts (comanda programada diària — cal un cron, no es pot detectar
+    // en desar un registre perquè el que passa és que no n'hi ha cap). Aquí només es resol: si s'ha arribat a
+    // sync() és perquè l'assignació acaba de rebre un registre, així que la ratxa sense registrar ja s'ha trencat.
+    private static function resolveMissingDays(RoutineAssignment $assignment): void
+    {
+        Alert::where('assignmentId', $assignment->id)
+            ->where('type', 'MISSING_DAYS')
+            ->whereIn('status', ['OPEN', 'SEEN'])
+            ->delete();
     }
 }

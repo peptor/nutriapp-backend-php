@@ -79,8 +79,9 @@ class ClinicalProgress
     }
 
     // +1 favorable, -1 desfavorable, null si no s'hi pot avaluar (tipus sense tendència, sense direcció, TARGET,
-    // canvi no significatiu, o menys de dos períodes amb dades).
-    private static function fieldScore($field, Collection $records, Carbon $last7From, Carbon $last7To, Carbon $prev7From, Carbon $prev7To): ?int
+    // canvi no significatiu, o menys de dos períodes amb dades). Públic: també el fa servir
+    // App\Support\AlertGenerator per a les alertes TREND_WORSE (mateix càlcul, camp a camp).
+    public static function fieldScore($field, Collection $records, Carbon $last7From, Carbon $last7To, Carbon $prev7From, Carbon $prev7To): ?int
     {
         $fieldType = $field->fieldType ?? $field['fieldType'] ?? null;
         $direction = $field->goodDirection ?? $field['goodDirection'] ?? null;

@@ -22,6 +22,15 @@ class AlertTexts
      */
     public static function for(Alert $alert, ?RoutineField $field, string $role, ?string $language = null): array
     {
+        // TREND_WORSE i MISSING_DAYS (30/09/2026) no són "un valor fora de rang d'un dia concret": tenen la
+        // seva pròpia redacció, sense el patró "etiqueta: valor (referència)" de la resta.
+        if ($alert->type === 'TREND_WORSE') {
+            return self::trendWorse($alert, $field, $role, $language);
+        }
+        if ($alert->type === 'MISSING_DAYS') {
+            return self::missingDays($alert, $role, $language);
+        }
+
         // Sense el rang entre parèntesis del final ("Cremor o acidesa (0-10)"): el valor ja va amb l'escala (8/10).
         $label = trim(preg_replace('/\s*\([^)]*\)\s*$/u', '', $field?->label ?? self::labelFromMessage($alert->message)));
         $value = self::shownValue($alert, $field);
@@ -56,6 +65,44 @@ class AlertTexts
         }
 
         return ['title' => $title, 'body' => $body, 'advice' => $advice, 'label' => $label, 'value' => $value];
+    }
+
+    // TREND_WORSE: $field és el camp amb tendència desfavorable (sempre real, no com MISSING_DAYS).
+    private static function trendWorse(Alert $alert, ?RoutineField $field, string $role, ?string $language): array
+    {
+        $label = trim(preg_replace('/\s*\([^)]*\)\s*$/u', '', $field?->label ?? self::labelFromMessage($alert->message)));
+
+        if ($role !== 'PACIENT') {
+            return ['title' => Translator::t('alert_title_trend_worse_nutri', $language), 'body' => $label, 'advice' => null, 'label' => $label, 'value' => ''];
+        }
+
+        return [
+            'title' => Translator::t('alert_title_trend_worse', $language),
+            'body' => ucfirst(Translator::t('alert_body_trend_worse', $language, ['label' => self::lowerFirst($label)])),
+            'advice' => Translator::t('alert_advice_trend_worse', $language),
+            'label' => $label,
+            'value' => '',
+        ];
+    }
+
+    // MISSING_DAYS: no té camp (fieldName és el sentinella AlertGenerator::MISSING_DAYS_FIELD), és de tota
+    // l'assignació; el nom de la rutina fa de "label" i cal l'`assignment.template` carregat (ja ho fa
+    // AlertsController::baseQuery).
+    private static function missingDays(Alert $alert, string $role, ?string $language): array
+    {
+        $routine = $alert->assignment?->template?->name ?? '';
+
+        if ($role !== 'PACIENT') {
+            return ['title' => Translator::t('alert_title_missing_days_nutri', $language), 'body' => $routine, 'advice' => null, 'label' => $routine, 'value' => ''];
+        }
+
+        return [
+            'title' => Translator::t('alert_title_missing_days', $language),
+            'body' => Translator::t('alert_body_missing_days', $language, ['n' => AlertGenerator::MISSING_DAYS_THRESHOLD, 'routine' => $routine]),
+            'advice' => Translator::t('alert_advice_missing_days', $language),
+            'label' => $routine,
+            'value' => '',
+        ];
     }
 
     // Valor tal com el veu una persona: 8/10 (escala), 148 / 92 mmHg (pressió), 3 kg (número amb unitat), Sí / No.
