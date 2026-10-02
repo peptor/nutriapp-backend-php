@@ -18,6 +18,8 @@ class StoreAppointmentRequest extends FormRequest
             'startAt' => ['required', 'date'],
             'endAt' => ['required', 'date', 'after:startAt'],
             'reason' => ['nullable', 'string', 'max:500'],
+            'modality' => ['sometimes', 'in:IN_PERSON,PHONE'],
+            'location' => ['nullable', 'string', 'max:255'],
         ];
     }
 }

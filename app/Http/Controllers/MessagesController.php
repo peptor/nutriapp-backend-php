@@ -7,6 +7,7 @@ use App\Models\Message;
 use App\Models\MessageThread;
 use App\Models\Patient;
 use App\Models\User;
+use App\Support\AppointmentMessenger;
 use App\Support\MessageHtml;
 use App\Support\UrlHelper;
 use Illuminate\Database\Eloquent\Builder;
@@ -118,7 +119,7 @@ class MessagesController extends Controller
             ->whereNull('readAt')
             ->update(['readAt' => now()]);
 
-        $messages = $thread->messages()->with('sender:id,name')->orderBy('createdAt')->get();
+        $messages = $thread->messages()->with(['sender:id,name', 'appointment'])->orderBy('createdAt')->get();
 
         return response()->json([
             'id' => $thread->id,
@@ -131,6 +132,8 @@ class MessagesController extends Controller
                 'body' => $m->body,
                 'createdAt' => $m->createdAt,
                 'readAt' => $m->readAt,
+                // Sol·licitud de visita: el nutricionista hi veu Acceptar / Rebutjar mentre estigui pendent.
+                'appointment' => $m->appointment ? AppointmentMessenger::presentForMessage($m->appointment) : null,
                 'attachment' => $m->attachmentPath ? [
                     'name' => $m->attachmentName,
                     'mime' => $m->attachmentMime,

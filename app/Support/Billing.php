@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 // Cobrament dels nutricionistes amb Stripe Billing (subscripció mensual o anual). Es parla amb l'API REST d'Stripe
@@ -64,6 +65,14 @@ class Billing
         $profile->forceFill(['stripeCustomerId' => $customer['id']])->save();
 
         return $customer['id'];
+    }
+
+    // La factura necessita la raó social i el NIF/CIF del client: sense ells no es pot pagar la llicència.
+    public static function fiscalDataComplete(User $nutricionista): bool
+    {
+        $profile = NutricionistaProfile::where('userId', $nutricionista->id)->first(['companyName', 'taxId']);
+
+        return $profile && trim((string) $profile->companyName) !== '' && trim((string) $profile->taxId) !== '';
     }
 
     public static function hasCustomer(User $nutricionista): bool
@@ -139,8 +148,13 @@ class Billing
         if (! $invoiceId || ! $line || empty($line['period']['end'])) {
             return null;
         }
-        if (NutricionistaLicense::where('paymentRef', $invoiceId)->exists()) {
-            return null; // idempotència: Stripe pot reenviar el mateix esdeveniment
+        $existing = NutricionistaLicense::where('paymentRef', $invoiceId)->first();
+        if ($existing) {
+            // Idempotència: Stripe pot reenviar el mateix esdeveniment. Si la factura no va arribar a emetre's (p. ex.
+            // faltaven les dades de l'emissor), aquí es recupera.
+            self::issueInvoice($existing);
+
+            return null;
         }
 
         $nutricionistaId = NutricionistaProfile::where('stripeCustomerId', $invoice['customer'] ?? '')->value('userId')
@@ -153,7 +167,7 @@ class Billing
         $start = Carbon::createFromTimestampUTC($line['period']['start'] ?? $invoice['created'] ?? time());
         $end = Carbon::createFromTimestampUTC($line['period']['end']);
 
-        return NutricionistaLicense::create([
+        $license = NutricionistaLicense::create([
             'nutricionistaId' => $nutricionista->id,
             'startsAt' => $start->toDateString(),
             'endsAt' => $end->toDateString(),
@@ -164,5 +178,19 @@ class Billing
             'currency' => strtoupper((string) ($invoice['currency'] ?? 'eur')),
             'paymentRef' => $invoiceId,
         ]);
+        self::issueInvoice($license);
+
+        return $license;
+    }
+
+    // La factura de NutriEvo del pagament. Un error aquí mai no ha de tombar el webhook (la llicència ja està creada):
+    // es registra i `php artisan invoices:issue-missing` ho pot recuperar.
+    private static function issueInvoice(NutricionistaLicense $license): void
+    {
+        try {
+            Invoices::ensureForLicense($license);
+        } catch (\Throwable $e) {
+            Log::error('Factura del pagament '.$license->paymentRef.': '.$e->getMessage());
+        }
     }
 }

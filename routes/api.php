@@ -9,8 +9,10 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FoodLibraryController;
+use App\Http\Controllers\InvoicesController;
 use App\Http\Controllers\LicenseController;
 use App\Http\Controllers\MessagesController;
+use App\Http\Controllers\PatientAppointmentsController;
 use App\Http\Controllers\PatientsController;
 use App\Http\Controllers\PushController;
 use App\Http\Controllers\RecordsController;
@@ -70,6 +72,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [AppointmentController::class, 'store']);
         Route::put('/{id}', [AppointmentController::class, 'update']);
         Route::delete('/{id}', [AppointmentController::class, 'destroy']);
+        Route::post('/{id}/accept', [AppointmentController::class, 'accept']);
+        Route::post('/{id}/reject', [AppointmentController::class, 'reject']);
     });
 
     // ——— Horari (patró de disponibilitat, excepcions i resolució per data) ———
@@ -168,8 +172,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/my-nutricionistes', [BusinessController::class, 'myNutricionistes'])->middleware('role:PACIENT');
     });
 
+    // Visites del pacient (llista, detall, sol·licitud, notes i anul·lació).
+    Route::prefix('patient/appointments')->middleware('role:PACIENT')->group(function () {
+        Route::get('/', [PatientAppointmentsController::class, 'index']);
+        Route::post('/', [PatientAppointmentsController::class, 'store'])->middleware('throttle:20,1');
+        Route::get('/{id}', [PatientAppointmentsController::class, 'show']);
+        Route::patch('/{id}', [PatientAppointmentsController::class, 'update']);
+        Route::post('/{id}/cancel', [PatientAppointmentsController::class, 'cancel']);
+    });
+
     // El pla (EvoDemo / EvoPro) del nutricionista autenticat i l'historial de llicències.
     Route::get('/license/me', [LicenseController::class, 'me'])->middleware('role:NUTRICIONISTA');
+
+    // Factures de la quota EvoPro del nutricionista autenticat.
+    Route::get('/invoices', [InvoicesController::class, 'index'])->middleware('role:NUTRICIONISTA');
+    Route::get('/invoices/{id}', [InvoicesController::class, 'show'])->middleware('role:NUTRICIONISTA');
 
     // Cobrament d'EvoPro (Stripe Billing): pagament de la subscripció i portal de client.
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware('role:NUTRICIONISTA', 'throttle:10,1');

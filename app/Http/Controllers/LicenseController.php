@@ -16,7 +16,11 @@ class LicenseController extends Controller
         return response()->json([
             'plan' => Licenses::summary($licenses),
             'usage' => Licenses::usage($request->user()),
-            'billing' => ['enabled' => Billing::configured(), 'hasCustomer' => Billing::hasCustomer($request->user())],
+            'billing' => [
+                'enabled' => Billing::configured(),
+                'hasCustomer' => Billing::hasCustomer($request->user()),
+                'fiscalDataComplete' => Billing::fiscalDataComplete($request->user()),
+            ],
             'history' => $licenses->take(10)->map(fn ($l) => [
                 'id' => $l->id,
                 'startsAt' => $l->startsAt->toDateString(),

@@ -52,7 +52,7 @@ class PatientsController extends Controller
             ->with([
                 'user:id,name,email,phone',
                 'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'template.fields', 'records:id,assignmentId,recordDate,fieldName,value']),
-                'appointments' => fn ($q) => $q->orderBy('startAt'),
+                'appointments' => fn ($q) => $q->confirmed()->orderBy('startAt'),
             ])
             ->orderBy('createdAt', 'desc')
             ->get();
@@ -167,7 +167,7 @@ class PatientsController extends Controller
             'assignments.template.icon',
             'assignments.template.fields',
             'assignments.records' => fn ($q) => $q->orderBy('recordDate', 'desc'),
-            'appointments' => fn ($q) => $q->orderBy('startAt'),
+            'appointments' => fn ($q) => $q->confirmed()->orderBy('startAt'),
         ])->find($id);
 
         if (! $patient) {

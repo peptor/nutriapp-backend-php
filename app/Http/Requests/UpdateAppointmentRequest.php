@@ -18,6 +18,8 @@ class UpdateAppointmentRequest extends FormRequest
             'startAt' => ['sometimes', 'date'],
             'endAt' => ['sometimes', 'date', 'after:startAt'],
             'reason' => ['nullable', 'string', 'max:500'],
+            'modality' => ['sometimes', 'in:IN_PERSON,PHONE'],
+            'location' => ['nullable', 'string', 'max:255'],
         ];
     }
 }
