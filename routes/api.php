@@ -5,9 +5,11 @@ use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AdviceController;
 use App\Http\Controllers\AlertsController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BillingController;
 use App\Http\Controllers\BusinessController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FoodLibraryController;
+use App\Http\Controllers\LicenseController;
 use App\Http\Controllers\MessagesController;
 use App\Http\Controllers\PatientsController;
 use App\Http\Controllers\PushController;
@@ -16,6 +18,9 @@ use App\Http\Controllers\ReminderNoticesController;
 use App\Http\Controllers\RoutinesController;
 use App\Http\Controllers\ScheduleController;
 use Illuminate\Support\Facades\Route;
+
+// Webhook de Stripe (sense sessió; es valida amb la signatura Stripe-Signature).
+Route::post('/stripe/webhook', [BillingController::class, 'webhook']);
 
 // ——— Auth ———
 // Rate limit per rutes d'autenticació: frena atacs de força bruta al login/registre
@@ -163,6 +168,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/my-nutricionistes', [BusinessController::class, 'myNutricionistes'])->middleware('role:PACIENT');
     });
 
+    // El pla (EvoDemo / EvoPro) del nutricionista autenticat i l'historial de llicències.
+    Route::get('/license/me', [LicenseController::class, 'me'])->middleware('role:NUTRICIONISTA');
+
+    // Cobrament d'EvoPro (Stripe Billing): pagament de la subscripció i portal de client.
+    Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware('role:NUTRICIONISTA', 'throttle:10,1');
+    Route::post('/billing/portal', [BillingController::class, 'portal'])->middleware('role:NUTRICIONISTA', 'throttle:10,1');
+
     // ——— Admin ———
     // Totes les rutes d'aquest grup requereixen rol ADMIN.
     Route::prefix('admin')->middleware('role:ADMIN')->group(function () {
@@ -173,6 +185,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users', [AdminController::class, 'store']);
         Route::patch('/users/{id}', [AdminController::class, 'update']);
         Route::delete('/users/{id}', [AdminController::class, 'destroy']);
+        Route::put('/nutricionistes/{id}/license', [AdminController::class, 'grantLicense']);
+        Route::delete('/nutricionistes/{id}/license', [AdminController::class, 'revokeLicense']);
         Route::get('/access-logs', [AdminController::class, 'accessLogs']);
     });
 });

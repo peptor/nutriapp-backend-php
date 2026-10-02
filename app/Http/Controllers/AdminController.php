@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\AdminCreateUserRequest;
+use App\Http\Requests\AdminGrantLicenseRequest;
 use App\Http\Requests\AdminUpdateUserRequest;
 use App\Models\AccessLog;
 use App\Models\Patient;
 use App\Models\RoutineTemplate;
 use App\Models\User;
+use App\Support\Licenses;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -19,7 +21,22 @@ class AdminController extends Controller
         return User::with([
             'patientProfiles:id,userId,nutricionistaId,birthDate,notes,createdAt',
             'patientProfiles.nutricionista:id,name,email',
+            'licenses',
         ]);
+    }
+
+    // Afegeix `plan` ({code: EvoPro|EvoDemo, until, indefinite}) als nutricionistes d'un usuari o d'una col·lecció
+    // (les llicències ja venen carregades amb userWith) i amaga l'historial en brut.
+    private function withPlan($users)
+    {
+        foreach ($users instanceof User ? [$users] : $users as $u) {
+            if ($u->role === 'NUTRICIONISTA') {
+                $u->setAttribute('plan', Licenses::summary($u->licenses));
+            }
+            $u->makeHidden('licenses');
+        }
+
+        return $users;
     }
 
     // Llista els usuaris actius (per defecte). Els usuaris eliminats (anonimitzats)
@@ -28,7 +45,7 @@ class AdminController extends Controller
     {
         $users = $this->userWith()->whereNull('deletedAt')->orderBy('role')->orderBy('name')->get();
 
-        return response()->json($users);
+        return response()->json($this->withPlan($users));
     }
 
     // Llista els usuaris eliminats (anonimitzats)
@@ -36,7 +53,7 @@ class AdminController extends Controller
     {
         $users = $this->userWith()->whereNotNull('deletedAt')->orderBy('deletedAt', 'desc')->get();
 
-        return response()->json($users);
+        return response()->json($this->withPlan($users));
     }
 
     // Llista només nutricionistes (útil per al selector en crear/reassignar pacient)
@@ -55,7 +72,33 @@ class AdminController extends Controller
             return response()->json(['error' => 'Usuari no trobat'], 404);
         }
 
-        return response()->json($user);
+        return response()->json($this->withPlan($user));
+    }
+
+    // Passa un nutricionista a EvoPro fins a la data indicada (inclosa). Revoca la llicència vigent i en crea una
+    // de nova (source ADMIN), així la data indicada és la que mana, sigui més llunyana o més propera.
+    public function grantLicense(AdminGrantLicenseRequest $request, string $id)
+    {
+        $target = User::where('role', 'NUTRICIONISTA')->whereNull('deletedAt')->find($id);
+        if (! $target) {
+            return response()->json(['error' => 'Nutricionista no trobat'], 404);
+        }
+        $data = $request->validated();
+        Licenses::grant($target, $data['endsAt'], 'ADMIN', $request->user()->id, ['note' => $data['note'] ?? null]);
+
+        return response()->json($this->withPlan($this->userWith()->find($id)));
+    }
+
+    // Passa un nutricionista a EvoDemo: revoca les llicències vigents (queden a l'historial).
+    public function revokeLicense(string $id)
+    {
+        $target = User::where('role', 'NUTRICIONISTA')->whereNull('deletedAt')->find($id);
+        if (! $target) {
+            return response()->json(['error' => 'Nutricionista no trobat'], 404);
+        }
+        Licenses::revokeActive($target);
+
+        return response()->json($this->withPlan($this->userWith()->find($id)));
     }
 
     // Crear usuari (ADMIN, NUTRICIONISTA o PACIENT). Un PACIENT mai es crea amb contrasenya
@@ -181,7 +224,7 @@ class AdminController extends Controller
             }
         });
 
-        return response()->json($this->userWith()->find($id));
+        return response()->json($this->withPlan($this->userWith()->find($id)));
     }
 
     // Eliminar usuari (soft delete / anonimització, mateix criteri que DELETE /auth/me)

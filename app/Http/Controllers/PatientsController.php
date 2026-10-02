@@ -6,6 +6,7 @@ use App\Http\Requests\CreatePatientRequest;
 use App\Http\Requests\UpdatePatientRequest;
 use App\Models\Patient;
 use App\Models\User;
+use App\Support\Licenses;
 use App\Support\AccessLogger;
 use App\Support\ClinicalProgress;
 use App\Support\RoutineProgress;
@@ -87,6 +88,9 @@ class PatientsController extends Controller
     {
         $data = $request->validated();
         $nutricionistaId = $request->user()->id;
+        if ($limitError = Licenses::patientLimitError($request->user())) {
+            return response()->json(['error' => $limitError, 'code' => 'PLAN_LIMIT'], 403);
+        }
         $existing = User::where('email', $data['email'])->first();
 
         if ($existing) {

@@ -66,8 +66,9 @@ class DashboardController extends Controller
         // el total de rutines completades que sí que es van poder valorar (prou dades).
         $ratedAssignments = $ownAssignments()->whereNotNull('evolutionRating');
         $ratedTotal = (clone $ratedAssignments)->count();
-        $positiveTotal = (clone $ratedAssignments)->where('evolutionRating', 'POSITIVE')->count();
-        $positiveEvolutionPercent = $ratedTotal > 0 ? (int) round(($positiveTotal / $ratedTotal) * 100) : null;
+        $ratingCounts = (clone $ratedAssignments)->selectRaw('evolutionRating, COUNT(*) as total')->groupBy('evolutionRating')->pluck('total', 'evolutionRating');
+        $ratingPercent = fn (string $rating) => $ratedTotal > 0 ? (int) round((($ratingCounts[$rating] ?? 0) / $ratedTotal) * 100) : null;
+        $positiveEvolutionPercent = $ratingPercent('POSITIVE');
 
         return response()->json([
             'totalPatients' => $patients,
@@ -79,6 +80,11 @@ class DashboardController extends Controller
             'patientsInFollowUp' => $patientsInFollowUp,
             'patientsInFollowUpPercent' => $patientsInFollowUpPercent,
             'positiveEvolutionPercent' => $positiveEvolutionPercent,
+            'stableEvolutionPercent' => $ratingPercent('STABLE'),
+            'negativeEvolutionPercent' => $ratingPercent('NEGATIVE'),
+            'positiveEvolutionCount' => (int) ($ratingCounts['POSITIVE'] ?? 0),
+            'stableEvolutionCount' => (int) ($ratingCounts['STABLE'] ?? 0),
+            'negativeEvolutionCount' => (int) ($ratingCounts['NEGATIVE'] ?? 0),
             'ratedAssignmentsTotal' => $ratedTotal,
         ]);
     }
@@ -207,6 +213,7 @@ class DashboardController extends Controller
                 'startDate' => $assignment->startDate,
                 'endDate' => $assignment->endDate,
                 'status' => $assignment->status,
+                'evolutionRating' => $assignment->evolutionRating,
                 'templateName' => $assignment->template->name,
                 'objective' => $assignment->template->objective,
                 'patientName' => $assignment->patient->user->name,

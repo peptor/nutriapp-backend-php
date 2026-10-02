@@ -13,6 +13,7 @@ use App\Mail\PasswordResetMail;
 use App\Models\Patient;
 use App\Models\PasswordResetToken;
 use App\Models\User;
+use App\Support\Licenses;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -37,6 +38,12 @@ class AuthController extends Controller
             'phone' => $user->phone,
             'language' => $user->language,
             'avatarUrl' => UrlHelper::toAbsoluteUrl($avatarUrl),
+            // Pla (EvoDemo/EvoPro): el del nutricionista; el d'un pacient és EvoPro si algun dels seus nutricionistes ho és.
+            'plan' => match ($user->role) {
+                'NUTRICIONISTA' => Licenses::planOf($user)['code'],
+                'PACIENT' => Licenses::patientHasPro($user) ? Licenses::PRO : Licenses::DEMO,
+                default => null,
+            },
             'brandingTheme' => $user->role === 'NUTRICIONISTA' ? ($user->nutricionistaProfile?->brandingTheme ?? 'original') : 'original',
             'notifyMessagesByEmail' => (bool) $user->notifyMessagesByEmail,
             'notifyByPush' => (bool) $user->notifyByPush,

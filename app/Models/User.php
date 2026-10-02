@@ -66,6 +66,12 @@ class User extends Authenticatable
         return $this->hasOne(NutricionistaProfile::class, 'userId');
     }
 
+    // Llicències EvoPro (només per a NUTRICIONISTA): historial; el pla es deriva amb App\Support\Licenses.
+    public function licenses(): HasMany
+    {
+        return $this->hasMany(NutricionistaLicense::class, 'nutricionistaId');
+    }
+
     public function accessLogs(): HasMany
     {
         return $this->hasMany(AccessLog::class, 'userId');

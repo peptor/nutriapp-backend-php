@@ -7,6 +7,7 @@ use App\Models\FoodFavorite;
 use App\Models\FoodRecentSelection;
 use App\Models\Patient;
 use App\Support\UrlHelper;
+use App\Support\Licenses;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -59,8 +60,21 @@ class FoodLibraryController extends Controller
         return response()->json($foods);
     }
 
+    // Un pacient sense cap nutricionista EvoPro no pot gestionar els seus aliments (afegir ni treure favorits).
+    private function demoPatientError(Request $request)
+    {
+        if ($request->user()->role === 'PACIENT' && ! Licenses::patientHasPro($request->user())) {
+            return response()->json(['error' => 'Gestionar els teus aliments requereix que el teu nutricionista tingui el pla EvoPro.', 'code' => 'PLAN_LIMIT'], 403);
+        }
+
+        return null;
+    }
+
     public function addFavorite(Request $request)
     {
+        if ($error = $this->demoPatientError($request)) {
+            return $error;
+        }
         [$patientId, $error] = $this->resolvePatientId($request);
         if ($error) {
             return $error;
@@ -76,6 +90,9 @@ class FoodLibraryController extends Controller
 
     public function removeFavorite(Request $request, string $foodId)
     {
+        if ($error = $this->demoPatientError($request)) {
+            return $error;
+        }
         [$patientId, $error] = $this->resolvePatientId($request);
         if ($error) {
             return $error;

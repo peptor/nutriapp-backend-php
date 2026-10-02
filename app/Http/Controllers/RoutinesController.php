@@ -18,6 +18,7 @@ use App\Models\RoutineField;
 use App\Models\RoutineFieldAdvice;
 use App\Models\RoutineInstruction;
 use App\Models\RoutineTemplate;
+use App\Support\Licenses;
 use App\Models\RoutineTemplateFood;
 use App\Support\ClinicalProgress;
 use App\Support\FieldRules;
@@ -176,6 +177,9 @@ class RoutinesController extends Controller
     // Converteix una rutina de biblioteca en una plantilla privada editable.
     public function templateFromLibrary(Request $request, string $libraryId)
     {
+        if ($limitError = Licenses::templateLimitError($request->user())) {
+            return response()->json(['error' => $limitError, 'code' => 'PLAN_LIMIT'], 403);
+        }
         $library = LibraryRoutine::with(['fields', 'fields.advice', 'instructions', 'foods'])->find($libraryId);
         if (! $library) {
             return response()->json(['error' => 'Rutina de biblioteca no trobada'], 404);
@@ -280,6 +284,9 @@ class RoutinesController extends Controller
     // Create template
     public function templatesStore(CreateRoutineTemplateRequest $request)
     {
+        if ($limitError = Licenses::templateLimitError($request->user())) {
+            return response()->json(['error' => $limitError, 'code' => 'PLAN_LIMIT'], 403);
+        }
         $data = $request->validated();
 
         $template = DB::transaction(function () use ($data, $request) {

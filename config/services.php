@@ -36,6 +36,14 @@ return [
     ],
 
 
+    // Cobrament d'EvoPro amb Stripe Billing (vegeu App\Support\Billing i docs/plans-i-llicencies.md).
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'price_monthly' => env('STRIPE_PRICE_MONTHLY'),
+        'price_annual' => env('STRIPE_PRICE_ANNUAL'),
+    ],
+
     // Web Push (notificacions push de la PWA). Genera les claus amb `php artisan push:generate-keys`.
     'webpush' => [
         'public_key' => env('VAPID_PUBLIC_KEY'),
