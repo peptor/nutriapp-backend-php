@@ -18,6 +18,9 @@ Laravel 13, PHP 8.3+, Sanctum, MySQL (BD local de desenvolupament: `nutricion_ru
 - Les regles d'alerta/tendència/adherència d'un camp són les columnes de `App\Support\FieldRules::COLUMNS` (trait `HasRuleColumns` als tres models de camp). Una columna nova de regla s'afegeix a `FieldRules::COLUMNS`/`CASTS`/`requestRules`, a la migració de les tres taules i al frontend (`lib/fieldRules.ts`, `lib/validators.ts`, `FieldRulesEditor`). Disseny i estat: `docs/disseny-migracions-regles-camps.md`.
 - Pla del nutricionista (EvoDemo/EvoPro): es deriva de `reg_nutricionista_licenses` amb `App\Support\Licenses`, mai es guarda; el migrate no crea llicències. Detall a `docs/plans-i-llicencies.md`.
 
+## Llistes llargues
+- Tot endpoint de llista que pot créixer **pagina al servidor** amb `?page&perPage` i respon `{ data, page, perPage, total, hasMore }` amb `App\Support\Paged::of($query, $request, $map)` (màx. 50 per pàgina). No retornar mai la llista sencera ni retallar-la en silenci (`limit`/`take`) sense paginació. El frontend la consumeix amb `useInfiniteList`/`ExpandableList` (norma «Llistes llargues» a `frontend/CLAUDE.md`). Exemple: `AdminNutricionistaController::licenses/invoices`.
+
 ## Verificació
 - `php -l <fitxer>` per a la sintaxi; `php artisan migrate:status` abans de migrar. Es pot migrar la BD local; a producció només arriba amb el deploy.
 - Per provar codi ràpid: `php artisan tinker --execute="..."`. Passar-li un fitxer com a argument es queda penjat esperant entrada.

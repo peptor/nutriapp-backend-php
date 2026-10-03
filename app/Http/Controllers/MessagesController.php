@@ -9,6 +9,7 @@ use App\Models\Patient;
 use App\Models\User;
 use App\Support\AppointmentMessenger;
 use App\Support\MessageHtml;
+use App\Support\Paged;
 use App\Support\UrlHelper;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -83,7 +84,7 @@ class MessagesController extends Controller
             ? $base->whereHas('messages', $unread)
             : $base->whereDoesntHave('messages', $unread);
 
-        $page = $query
+        $query
             ->with([
                 'patient.user:id,name',
                 'patient.nutricionista:id,name',
@@ -92,15 +93,11 @@ class MessagesController extends Controller
             ])
             ->withCount(['messages as unreadCount' => $unread, 'messages as messageCount'])
             ->orderByDesc('lastMessageAt')
-            ->paginate(20);
+            ->orderBy('id');
 
-        return response()->json([
-            'data' => $page->getCollection()->map(fn (MessageThread $t) => $this->threadSummary($t, $user))->values(),
-            'counts' => $counts,
-            'page' => $page->currentPage(),
-            'lastPage' => $page->lastPage(),
-            'total' => $page->total(),
-        ]);
+        // Paginat al servidor (norma «Llistes llargues»): { data, page, perPage, total, hasMore, counts }; el frontend va demanant
+        // pàgines de 20 en fer scroll.
+        return response()->json(Paged::of($query, $request, fn (MessageThread $t) => $this->threadSummary($t, $user), 20) + ['counts' => $counts]);
     }
 
     // Obre un fil: retorna tots els missatges i marca com a llegits els que rep l'usuari.

@@ -23,7 +23,7 @@ class BillingController extends Controller
         }
         if (! Billing::fiscalDataComplete($request->user())) {
             return response()->json([
-                'error' => 'Per pagar la llicència cal indicar la raó social i el CIF/NIF a Configuració › Empresa: surten a la factura.',
+                'error' => 'Per pagar la llicència cal indicar la raó social i el CIF/NIF a Configuració › Dades (secció «Dades de l\'empresa»): surten a la factura.',
                 'code' => 'FISCAL_DATA_MISSING',
             ], 422);
         }

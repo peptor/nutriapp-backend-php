@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Alert;
-use App\Support\AlertTexts;
-use App\Support\UrlHelper;
+use App\Support\NoticeFeed;
+use App\Support\Paged;
 use Illuminate\Http\Request;
 
 // Alertes (reg_alerts): llista, recompte per a la insígnia del menú i canvi d'estat.
@@ -25,37 +25,44 @@ class AlertsController extends Controller
     // Pacient: ?status=pending (encara no vistes per ell) | seen (ja vistes) | all, independent de l'estat del nutricionista.
     // ?assignmentId=… restringeix a una sola rutina (secció "Notes"/"Incidències" de l'Evolució, amb `all`: tot
     // l'històric, resoltes incloses — no és una safata de feina, és el registre de com ha anat la rutina).
-    // Urgents primer, i després les més recents.
+    // Urgents primer (llevat de ?order=date), i després les més recents. PAGINADA: ?page&perPage → { data, page, perPage, total, hasMore }.
     public function index(Request $request)
     {
-        $status = $request->query('status', 'pending');
         $role = $request->user()->role;
         $language = $request->user()->language;
         $query = $this->baseQuery($request);
         if ($request->filled('assignmentId')) {
             $query->where('assignmentId', $request->query('assignmentId'));
         }
-        if ($status === 'all') {
-            // Sense filtre d'estat: tot l'històric.
-        } elseif ($role === 'PACIENT') {
-            $status === 'seen' ? $query->whereNotNull('patientSeenAt') : $query->whereNull('patientSeenAt');
-        } elseif ($status === 'pending') {
-            $query->where('status', 'OPEN');
-        } elseif ($status === 'seen') {
-            $query->where('status', 'SEEN');
-        } elseif ($status === 'resolved') {
-            $query->where('status', 'RESOLVED');
+        NoticeFeed::applyAlertStatus($query, $role, $request->query('status', 'pending'));
+        // ?order=date: només per data (la targeta «Notes»); per defecte, urgents primer (la targeta «Incidències»).
+        if ($request->query('order') !== 'date') {
+            $query->orderByRaw("CASE level WHEN 'URGENT' THEN 0 ELSE 1 END");
         }
-
-        $items = $query
-            ->orderByRaw("CASE level WHEN 'URGENT' THEN 0 ELSE 1 END")
+        $query
             ->orderBy('recordDate', 'desc')
             ->orderBy('createdAt', 'desc')
-            ->limit(300)
-            ->get()
-            ->map(fn (Alert $alert) => $this->formatAlert($alert, $role, $language));
+            ->orderBy('id');
 
-        return response()->json($items);
+        return response()->json(Paged::of($query, $request, fn (Alert $alert) => NoticeFeed::alert($alert, $role, $language)));
+    }
+
+    // Safata del menú Alertes/Avisos (avisos + recordatoris + consells barrejats per data), paginada. Sense ?patientId és la
+    // llista plana de tot el que veu l'usuari (el pacient); amb ?patientId, la d'un sol pacient (el «Veure tot» d'un grup).
+    public function feed(Request $request)
+    {
+        [$page, $perPage] = Paged::window($request);
+
+        return response()->json(NoticeFeed::page($request, $request->query('status', 'pending'), $request->query('patientId'), $page, $perPage));
+    }
+
+    // Nutricionista: la safata agrupada per pacient. Pàgina de pacients (activitat més recent primer), cadascun amb el recompte
+    // total i els seus 5 primers elements; la resta es demana amb feed?patientId=… en desplegar el grup.
+    public function groups(Request $request)
+    {
+        [$page, $perPage] = Paged::window($request);
+
+        return response()->json(NoticeFeed::groups($request, $request->query('status', 'pending'), $page, $perPage));
     }
 
     // Avui del pacient: alertes fora de rang o urgents (qualsevol data) + qualsevol altre avís d'avui o ahir,
@@ -74,42 +81,14 @@ class AlertsController extends Controller
             ->orderBy('recordDate', 'desc')
             ->limit(50)
             ->get()
-            ->map(fn (Alert $alert) => $this->formatAlert($alert, $role, $language));
+            ->map(fn (Alert $alert) => NoticeFeed::alert($alert, $role, $language));
 
         return response()->json($items);
     }
 
     private function baseQuery(Request $request)
     {
-        return $this->own($request)->with(['assignment:id,patientId,templateId', 'assignment.patient:id,userId,photoUrl', 'assignment.patient.user:id,name', 'assignment.patient.nutricionista:id,name', 'assignment.template:id,name', 'assignment.template.fields']);
-    }
-
-    private function formatAlert(Alert $alert, string $role, ?string $language): array
-    {
-        return [
-            'id' => $alert->id,
-            'assignmentId' => $alert->assignmentId,
-            'patientId' => $alert->assignment->patientId,
-            'nutricionistaId' => $alert->assignment->patient->nutricionistaId,
-            'nutricionistaName' => $alert->assignment->patient->nutricionista?->name,
-            'patientName' => $alert->assignment->patient->user->name,
-            'patientPhotoUrl' => UrlHelper::toAbsoluteUrl($alert->assignment->patient->photoUrl),
-            'routineName' => $alert->assignment->template->name,
-            'fieldName' => $alert->fieldName,
-            'type' => $alert->type,
-            'recordDate' => $alert->recordDate->toDateString(),
-            'level' => $alert->level,
-            'severity' => $alert->severity,
-            'reference' => $alert->reference,
-            'message' => $alert->message,
-            // Al final: 'title'/'body'/'advice'/'label'/'value' (aquest últim ja formatat, p. ex. "8/10"), pot
-            // sobreescriure qualsevol clau anterior amb el mateix nom si mai coincidissin.
-            ...AlertTexts::for($alert, $alert->assignment->template->fields->firstWhere('name', $alert->fieldName), $role, $language),
-            'status' => $alert->status,
-            'seenAt' => $alert->seenAt,
-            'resolvedAt' => $alert->resolvedAt,
-            'patientSeenAt' => $alert->patientSeenAt,
-        ];
+        return $this->own($request)->with(NoticeFeed::alertRelations());
     }
 
     // Comptadors per a la insígnia del menú: urgents oberts (sense veure) i totals pendents.

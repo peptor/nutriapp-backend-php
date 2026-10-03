@@ -20,7 +20,7 @@ class NutricionistaLicense extends Model
     const UPDATED_AT = null;
 
     protected $fillable = [
-        'nutricionistaId', 'startsAt', 'endsAt', 'billingPeriod', 'source', 'amountCents', 'currency', 'paymentRef', 'createdById', 'note', 'revokedAt',
+        'nutricionistaId', 'startsAt', 'endsAt', 'billingPeriod', 'source', 'amountCents', 'currency', 'paymentRef', 'createdById', 'note', 'revokedAt', 'expiryReminderSentAt',
     ];
 
     protected function casts(): array
@@ -29,6 +29,7 @@ class NutricionistaLicense extends Model
             'startsAt' => 'date:Y-m-d',
             'endsAt' => 'date:Y-m-d',
             'revokedAt' => 'datetime',
+            'expiryReminderSentAt' => 'datetime',
             'amountCents' => 'integer',
             'createdAt' => 'datetime',
         ];

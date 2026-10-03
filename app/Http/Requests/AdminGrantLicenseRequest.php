@@ -16,6 +16,9 @@ class AdminGrantLicenseRequest extends FormRequest
         return [
             'endsAt' => ['required', 'date_format:Y-m-d', 'after_or_equal:today'],
             'note' => ['nullable', 'string', 'max:255'],
+            // Si s'indica l'import cobrat (IVA inclòs, en cèntims), s'emet la factura de la quota com si hagués pagat.
+            'amountCents' => ['nullable', 'integer', 'min:1', 'max:10000000'],
+            'billingPeriod' => ['required_with:amountCents', 'nullable', 'in:MONTHLY,ANNUAL'],
         ];
     }
 

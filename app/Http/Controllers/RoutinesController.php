@@ -22,6 +22,7 @@ use App\Support\Licenses;
 use App\Models\RoutineTemplateFood;
 use App\Support\ClinicalProgress;
 use App\Support\FieldRules;
+use App\Support\Paged;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,18 +33,73 @@ use Illuminate\Support\Facades\DB;
 class RoutinesController extends Controller
 {
     // Biblioteca clínica predefinida i catàleg d'aliments.
-    public function library()
+    // Ordre de presentació de les categories a la biblioteca (mirall de CATEGORY_ORDER a frontend/src/lib/routineCategories.ts).
+    private const LIBRARY_CATEGORY_ORDER = ['General', 'Nutrició general', 'Cardiovascular', 'Metabòlic', 'Digestiu', 'Hepàtic', 'Renal', 'Embaràs', 'Pediatria', 'Geriatria', 'Oncologia', 'Disfàgia', 'Postoperatori', 'Esportiva', 'TCA'];
+
+    private const LIBRARY_NO_CATEGORY = 'Altres';
+
+    // Biblioteca de rutines, PAGINADA al servidor (norma «Llistes llargues»): { data, page, perPage, total, hasMore, categories }.
+    // ?q= (nom, categoria, etiquetes, descripció, objectiu), ?cat= (una categoria; «Altres» = sense), ?sort=relevance|name_asc|
+    // name_desc|days_asc|days_desc. `categories` són les fitxes del filtre amb el seu recompte sota la cerca (sense el filtre de
+    // categoria) en l'ordre de presentació.
+    public function library(Request $request)
     {
-        $routines = LibraryRoutine::with([
+        $needle = trim((string) $request->query('q', ''));
+        $search = LibraryRoutine::query();
+        if ($needle !== '') {
+            $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($needle)).'%';
+            $search->where(fn ($q) => $q
+                ->whereRaw('lower(name) like ?', [$like])
+                ->orWhereRaw("lower(coalesce(category, '')) like ?", [$like])
+                ->orWhereRaw("lower(coalesce(tags, '')) like ?", [$like])
+                ->orWhereRaw("lower(coalesce(description, '')) like ?", [$like])
+                ->orWhereRaw("lower(coalesce(objective, '')) like ?", [$like]));
+        }
+
+        $order = self::LIBRARY_CATEGORY_ORDER;
+        $rank = fn (string $name) => (($i = array_search($name, $order, true)) === false) ? count($order) : $i;
+        $categories = (clone $search)
+            ->selectRaw("coalesce(nullif(category, ''), ?) as facet, count(*) as n", [self::LIBRARY_NO_CATEGORY])
+            ->groupBy('facet')
+            ->get()
+            ->map(fn ($row) => ['name' => $row->facet, 'count' => (int) $row->n])
+            ->sort(fn ($a, $b) => $rank($a['name']) <=> $rank($b['name']) ?: strcmp($a['name'], $b['name']))
+            ->values();
+
+        $query = clone $search;
+        if ($request->filled('cat')) {
+            $cat = $request->query('cat');
+            $cat === self::LIBRARY_NO_CATEGORY ? $query->where(fn ($q) => $q->whereNull('category')->orWhere('category', '')) : $query->where('category', $cat);
+        }
+        $caseRank = 'case category'.collect($order)->map(fn ($name, $i) => " when '".str_replace("'", "''", $name)."' then $i")->implode('').' else '.count($order).' end';
+        match ($request->query('sort', 'relevance')) {
+            'name_asc' => $query->orderBy('name'),
+            'name_desc' => $query->orderByDesc('name'),
+            'days_asc' => $query->orderBy('durationDays')->orderBy('name'),
+            'days_desc' => $query->orderByDesc('durationDays')->orderBy('name'),
+            default => $query->orderByRaw($caseRank)->orderBy('name'),
+        };
+        $query->with([
             'icon',
             'fields' => fn ($q) => $q->orderBy('orderIndex'),
             'fields.fieldIcon',
             'fields.advice',
             'instructions' => fn ($q) => $q->orderBy('orderIndex'),
             'foods.food.category',
-        ])->orderBy('name')->get();
+        ]);
 
-        return response()->json($routines);
+        return response()->json(Paged::of($query, $request, fn (LibraryRoutine $routine) => $routine->toArray(), 12) + ['categories' => $categories]);
+    }
+
+    // Un camp de la biblioteca amb els seus consells (per «Restaura les regles» del formulari de rutina), sense baixar la biblioteca sencera.
+    public function libraryField(string $id)
+    {
+        $field = \App\Models\LibraryRoutineField::with('advice')->find($id);
+        if (! $field) {
+            return response()->json(['error' => 'Camp no trobat'], 404);
+        }
+
+        return response()->json($field);
     }
 
     // Catàleg d'aliments: el nutricionista el consulta per configurar rutines, i el
@@ -258,11 +314,10 @@ class RoutinesController extends Controller
     // seus propis pacients, així que aquí es filtren les assignacions per sys_patients.nutricionistaId
     // = l'usuari actual — si no, un nutricionista veuria comptats pacients d'altres nutricionistes
     // que també fan servir la mateixa plantilla pública.
-    public function templatesIndex(Request $request)
+    // Consulta de les plantilles visibles pel nutricionista (les seves i les públiques), amb recomptes d'ús.
+    private function templatesQuery(string $nutricionistaId)
     {
-        $nutricionistaId = $request->user()->id;
-
-        $templates = RoutineTemplate::where(fn ($q) => $q->where('createdById', $nutricionistaId)->orWhere('isPublic', true))
+        return RoutineTemplate::where(fn ($q) => $q->where('createdById', $nutricionistaId)->orWhere('isPublic', true))
             ->with(['icon', 'fields' => fn ($q) => $q->orderBy('orderIndex'), 'fields.advice', 'foods.food.category'])
             ->withCount([
                 'assignments as patientsCount' => fn ($q) => $q
@@ -274,11 +329,53 @@ class RoutinesController extends Controller
                     ->where('sys_patients.nutricionistaId', $nutricionistaId)
                     ->join('reg_daily_records', 'reg_daily_records.assignmentId', '=', 'reg_routine_assignments.id')
                     ->select(DB::raw('count(reg_daily_records.id)')),
-            ])
-            ->orderBy('createdAt', 'desc')
-            ->get();
+            ]);
+    }
 
-        return response()->json($templates);
+    // Plantilles del nutricionista, PAGINADES al servidor (norma «Llistes llargues»): { data, page, perPage, total, hasMore }.
+    // ?q= (nom, categoria, etiquetes), ?sort=createdAt (per defecte, més noves primer) | name | durationDays (més llargues primer).
+    public function templatesIndex(Request $request)
+    {
+        $query = $this->templatesQuery($request->user()->id);
+        if ($request->filled('q')) {
+            $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower(trim($request->query('q')))).'%';
+            $query->where(fn ($q) => $q
+                ->whereRaw('lower(name) like ?', [$like])
+                ->orWhereRaw("lower(coalesce(category, '')) like ?", [$like])
+                ->orWhereRaw("lower(coalesce(tags, '')) like ?", [$like]));
+        }
+        match ($request->query('sort', 'createdAt')) {
+            'name' => $query->orderBy('name'),
+            'durationDays' => $query->orderByDesc('durationDays')->orderBy('name'),
+            default => $query->orderByDesc('createdAt'),
+        };
+        $query->orderBy('id');
+
+        return response()->json(Paged::of($query, $request, fn (RoutineTemplate $template) => $template->toArray(), 6));
+    }
+
+    // Llista LLEUGERA de plantilles per al selector d'assignar rutina (id, nom, durada i icona), sense camps ni consells.
+    public function templatesOptions(Request $request)
+    {
+        $nutricionistaId = $request->user()->id;
+
+        return response()->json(
+            RoutineTemplate::where(fn ($q) => $q->where('createdById', $nutricionistaId)->orWhere('isPublic', true))
+                ->with('icon')
+                ->orderBy('name')
+                ->get(['id', 'name', 'durationDays', 'iconId'])
+        );
+    }
+
+    // Una plantilla (la seva o una de pública) amb tot el detall, per al formulari d'edició.
+    public function templatesShow(Request $request, string $id)
+    {
+        $template = $this->templatesQuery($request->user()->id)->find($id);
+        if (! $template) {
+            return response()->json(['error' => 'Plantilla no trobada'], 404);
+        }
+
+        return response()->json($template);
     }
 
     // Create template
@@ -460,13 +557,10 @@ class RoutinesController extends Controller
         }
 
         $assignments = RoutineAssignment::where('patientId', $patient->id)
-            ->with(['template.fields', 'records' => fn ($q) => $q->orderBy('recordDate', 'desc')])
+            ->with(['template.fields'])
+            ->withCount('records as recordsCount')
             ->orderBy('startDate', 'desc')
             ->get();
-
-        // Limitem a 100 registres per assignació en PHP (no amb ->limit() a l'eager load): veure
-        // el comentari a PatientsController::show sobre la incompatibilitat amb MariaDB.
-        $assignments->each(fn ($a) => $a->setRelation('records', $a->records->take(100)));
 
         return response()->json($assignments);
     }
@@ -512,6 +606,9 @@ class RoutinesController extends Controller
             }
 
             $array = $a->toArray();
+            // Els registres només es fan servir aquí per calcular progrés i tendència; no es tornen (cada pantalla els demana a
+            // /records/assignment/{id}) perquè la resposta no creixi amb tot l'historial de rutines del pacient.
+            unset($array['records']);
             $array['nutricionistaId'] = $a->patient->nutricionistaId;
             $array['nutricionista'] = [
                 'id' => $a->patient->nutricionista->id,

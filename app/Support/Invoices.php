@@ -13,7 +13,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
-// Factures de NutriEvo als nutricionistes per cada pagament de quota EvoPro (llicència source=PAYMENT):
+// Factures de NutriEvo als nutricionistes per cada pagament de quota EvoPro (llicència amb import cobrat: Stripe, o una
+// concessió d'administrador amb l'import cobrat fora d'Stripe, p. ex. per transferència):
 // - Una factura per llicència (únic licenseId): emetre-la dues vegades no en crea una segona.
 // - Numeració correlativa per any `NE-AAAA-NNNN`, sense forats (únic year+sequence, dins d'una transacció).
 // - L'import cobrat (`amountCents`) INCLOU l'IVA: base = total / (1 + IVA), IVA = total - base. Una línia de factura:
@@ -41,7 +42,7 @@ class Invoices
     // Emet (si cal) la factura d'una llicència de pagament i la renvia per correu si encara no ha sortit.
     public static function ensureForLicense(NutricionistaLicense $license): ?Invoice
     {
-        if ($license->source !== 'PAYMENT' || (int) $license->amountCents <= 0) {
+        if ((int) $license->amountCents <= 0) {
             return null; // sense import cobrat no hi ha res a facturar
         }
         $invoice = Invoice::where('licenseId', $license->id)->first();

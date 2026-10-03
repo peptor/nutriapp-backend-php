@@ -7,6 +7,7 @@ use App\Models\Patient;
 use App\Models\User;
 use App\Support\AppointmentAvailability;
 use App\Support\AppointmentMessenger as Messenger;
+use App\Support\Paged;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -26,17 +27,28 @@ class PatientAppointmentsController extends Controller
             ->with(['nutricionista:id,name', 'nutricionista.nutricionistaProfile:userId,companyName,logoUrl']);
     }
 
-    // { upcoming: [...] (data ascendent), previous: [...] (data descendent) }.
-    // Properes = pendents o confirmades que encara no han acabat; anteriors = la resta (fetes, anul·lades i rebutjades).
+    // Visites del pacient, PAGINADES al servidor (norma «Llistes llargues»): ?scope=upcoming (per defecte) | previous, ?page&perPage
+    // → { data, page, perPage, total, hasMore, counts: { upcoming, previous } }.
+    // Properes = pendents o confirmades que encara no han acabat, per data ascendent; anteriors = la resta (fetes, anul·lades i
+    // rebutjades), per data descendent.
     public function index(Request $request)
     {
-        $all = $this->mine($request)->get();
-        $isUpcoming = fn (Appointment $a) => in_array($a->status, ['REQUESTED', 'CONFIRMED'], true) && $a->endAt->gte(Messenger::nowWall());
+        $now = Messenger::nowWall()->toDateTimeString();
+        $upcoming = fn ($q) => $q->whereIn('status', ['REQUESTED', 'CONFIRMED'])->where('endAt', '>=', $now);
+        $counts = [
+            'upcoming' => $upcoming($this->mine($request))->count(),
+            'previous' => $this->mine($request)->whereNot(fn ($q) => $upcoming($q))->count(),
+        ];
 
-        return response()->json([
-            'upcoming' => $all->filter($isUpcoming)->sortBy('startAt')->map(fn ($a) => Messenger::presentForPatient($a))->values(),
-            'previous' => $all->reject($isUpcoming)->sortByDesc('startAt')->map(fn ($a) => Messenger::presentForPatient($a))->values(),
-        ]);
+        $query = $this->mine($request);
+        if ($request->query('scope') === 'previous') {
+            $query->whereNot(fn ($q) => $upcoming($q))->orderByDesc('startAt');
+        } else {
+            $upcoming($query)->orderBy('startAt');
+        }
+        $query->orderBy('id');
+
+        return response()->json(Paged::of($query, $request, fn (Appointment $a) => Messenger::presentForPatient($a)) + ['counts' => $counts]);
     }
 
     public function show(Request $request, string $id)

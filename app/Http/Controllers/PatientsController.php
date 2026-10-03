@@ -3,16 +3,19 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\CreatePatientRequest;
+use App\Http\Requests\SetPatientPasswordRequest;
 use App\Http\Requests\UpdatePatientRequest;
 use App\Models\Patient;
 use App\Models\User;
 use App\Support\Licenses;
 use App\Support\AccessLogger;
 use App\Support\ClinicalProgress;
+use App\Support\Paged;
 use App\Support\RoutineProgress;
 use App\Support\UrlHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 
 class PatientsController extends Controller
@@ -35,33 +38,78 @@ class PatientsController extends Controller
     // la cita passada més recent i la futura més propera, respectivament.
     private function visitFields(Patient $patient): array
     {
-        $now = now();
+        // Les hores de les visites són hora de rellotge (vegeu AppointmentMessenger): es compara amb l'"ara" de Madrid.
+        $now = \App\Support\AppointmentMessenger::nowWall();
         $next = $patient->appointments->first(fn ($a) => $a->startAt->gte($now));
         $past = $patient->appointments->filter(fn ($a) => $a->startAt->lt($now))->last();
 
         return [
             'nextAppointmentAt' => optional($next)->startAt,
+            'nextAppointmentModality' => optional($next)->modality,
             'lastVisitAt' => optional($past)->startAt,
+            'lastVisitModality' => optional($past)->modality,
         ];
     }
 
-    // List patients of nutricionista
+    // Pacients del nutricionista, PAGINATS al servidor (norma «Llistes llargues»): { data, page, perPage, total, hasMore, counts }.
+    // Filtres: ?tab=amb|sense|tots (amb/sense alguna rutina ACTIVE), ?q= (nom, correu o edat), ?patientId=, ?sort=nom|acaba|comenca
+    // (nom; els que acaben abans primer; els que han començat abans primer). `counts` són els totals de les tres pestanyes,
+    // independents de la cerca. Cada pacient porta les seves rutines amb progrés, tendència i alertes (només els de la pàgina).
     public function index(Request $request)
     {
-        $patients = Patient::where('nutricionistaId', $request->user()->id)
-            ->with([
-                'user:id,name,email,phone',
-                'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'template.fields', 'records:id,assignmentId,recordDate,fieldName,value']),
-                'appointments' => fn ($q) => $q->confirmed()->orderBy('startAt'),
-            ])
-            ->orderBy('createdAt', 'desc')
-            ->get();
+        $uid = $request->user()->id;
+        $active = fn ($q) => $q->select(DB::raw(1))->from('reg_routine_assignments as ra')->whereColumn('ra.patientId', 'sys_patients.id')->where('ra.status', 'ACTIVE');
 
+        $query = Patient::query()
+            ->select('sys_patients.*')
+            ->join('sys_users as u', 'u.id', '=', 'sys_patients.userId')
+            ->where('sys_patients.nutricionistaId', $uid)
+            ->selectSub(fn ($q) => $q->from('reg_routine_assignments as ra')->selectRaw('min(ra.endDate)')->whereColumn('ra.patientId', 'sys_patients.id')->where('ra.status', 'ACTIVE'), 'earliestActiveEnd')
+            ->selectSub(fn ($q) => $q->from('reg_routine_assignments as ra')->selectRaw('min(ra.startDate)')->whereColumn('ra.patientId', 'sys_patients.id'), 'earliestStart');
+
+        $counts = [
+            'tots' => (clone $query)->count(),
+            'amb' => (clone $query)->whereExists($active)->count(),
+        ];
+        $counts['sense'] = $counts['tots'] - $counts['amb'];
+
+        $tab = $request->query('tab', 'tots');
+        if ($tab === 'amb') {
+            $query->whereExists($active);
+        } elseif ($tab === 'sense') {
+            $query->whereNotExists($active);
+        }
+        if ($request->filled('patientId')) {
+            $query->where('sys_patients.id', $request->query('patientId'));
+        }
+        if ($request->filled('q')) {
+            $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower(trim($request->query('q')))).'%';
+            $query->where(fn ($q) => $q
+                ->whereRaw('lower(u.name) like ?', [$like])
+                ->orWhereRaw('lower(u.email) like ?', [$like])
+                ->orWhereRaw('cast(timestampdiff(year, sys_patients.birthDate, curdate()) as char) like ?', [$like]));
+        }
+        match ($request->query('sort', 'nom')) {
+            'acaba' => $query->orderByRaw('earliestActiveEnd is null')->orderBy('earliestActiveEnd'),
+            'comenca' => $query->orderByRaw('earliestStart is null')->orderBy('earliestStart'),
+            default => $query,
+        };
+        $query->orderBy('u.name')->orderBy('sys_patients.id');
+        $query->with([
+            'user:id,name,email,phone',
+            'assignments' => fn ($q) => $q->with(['template:id,name,description,durationDays,iconId', 'template.icon', 'template.fields', 'records:id,assignmentId,recordDate,fieldName,value']),
+            'appointments' => fn ($q) => $q->confirmed()->orderBy('startAt'),
+        ]);
+
+        // Els alertCounts es calculen un cop per pàgina: Paged::of mapeja fila a fila, per això es pagina a mà.
+        [$page, $perPage] = Paged::window($request);
+        $total = (clone $query)->count();
+        $patients = $query->forPage($page, $perPage)->get();
         $alertCounts = $this->alertCounts($patients->flatMap(fn ($patient) => $patient->assignments->pluck('id')));
 
         $result = $patients->map(function (Patient $patient) use ($alertCounts) {
             $array = $patient->toArray();
-            unset($array['appointments']);
+            unset($array['appointments'], $array['earliestActiveEnd'], $array['earliestStart']);
             $array['photoUrl'] = UrlHelper::toAbsoluteUrl($patient->photoUrl);
             $array = array_merge($array, $this->visitFields($patient));
             $array['assignments'] = $patient->assignments->map(function ($assignment) use ($alertCounts) {
@@ -78,7 +126,26 @@ class PatientsController extends Controller
             return $array;
         });
 
-        return response()->json($result);
+        return response()->json(Paged::envelope($result, $page, $perPage, $total) + ['counts' => $counts]);
+    }
+
+    // Llista LLEUGERA per als selectors de pacient (calendari, missatges, filtre de Pacients): només id, nom, correu i foto,
+    // sense rutines ni registres. No és la llista de treball (aquesta és index, paginada).
+    public function options(Request $request)
+    {
+        $rows = Patient::where('nutricionistaId', $request->user()->id)
+            ->with('user:id,name,email')
+            ->get()
+            ->map(fn (Patient $patient) => [
+                'id' => $patient->id,
+                'name' => $patient->user->name,
+                'email' => $patient->user->email,
+                'photoUrl' => UrlHelper::toAbsoluteUrl($patient->photoUrl),
+            ])
+            ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
+
+        return response()->json($rows);
     }
 
     // Crea un pacient (o hi afegeix una relació nova si l'email ja existeix com a pacient
@@ -193,9 +260,7 @@ class PatientsController extends Controller
         $array['photoUrl'] = UrlHelper::toAbsoluteUrl($patient->photoUrl);
         $array = array_merge($array, $this->visitFields($patient));
 
-        // L'adherència/tendència es calculen amb TOTS els registres (abans de limitar-los a
-        // 50 per a la vista): si es fes amb la llista ja retallada, una assignació amb més de
-        // 50 registres sortiria amb l'adherència infravalorada.
+        // L'adherència/tendència es calculen amb TOTS els registres de l'assignació.
         $alertCounts = $this->alertCounts($patient->assignments->pluck('id'));
         $array['assignments'] = $patient->assignments->map(function ($assignment) use ($alertCounts) {
             $data = $assignment->toArray();
@@ -203,15 +268,30 @@ class PatientsController extends Controller
             $data = array_merge($data, RoutineProgress::forAssignment($assignment));
             $keyFields = $assignment->template->fields->where('isKeyField', true);
             $data['trend'] = ClinicalProgress::of($assignment->startDate, $assignment->endDate, RoutineProgress::countedDates($assignment), $assignment->records, $keyFields);
-            // Limitem a 50 registres per assignació en PHP (no amb ->limit() a l'eager load): Eloquent
-            // implementaria el límit per relació amb ROW_NUMBER() OVER(...), que MariaDB (usat en
-            // local) no gestiona bé combinat amb aquesta subconsulta ("Mixing of GROUP columns...").
-            $data['records'] = $assignment->records->take(50)->values();
+            // Els registres no s'envien (abans, retallats a 50 en silenci): la fitxa només necessita saber-ne el nombre, per
+            // decidir si la rutina es pot eliminar. Els registres d'una rutina es llegeixen a /records/assignment/{id}.
+            unset($data['records']);
+            $data['recordsCount'] = $assignment->records->count();
 
             return $data;
         })->values();
 
         return response()->json($array);
+    }
+
+    // El nutricionista posa una contrasenya nova al seu pacient (sense la que té ara). Es tanquen les sessions obertes del pacient
+    // perquè entri amb la nova.
+    public function setPassword(SetPatientPasswordRequest $request, string $id)
+    {
+        $patient = Patient::with('user')->where('id', $id)->where('nutricionistaId', $request->user()->id)->first();
+        if (! $patient || ! $patient->user || $patient->user->deletedAt) {
+            return response()->json(['error' => 'Pacient no trobat'], 404);
+        }
+
+        $patient->user->update(['passwordHash' => Hash::make($request->validated('newPassword'))]);
+        $patient->user->tokens()->delete();
+
+        return response()->json(['message' => 'Contrasenya del pacient actualitzada correctament']);
     }
 
     // Update patient: actualitza dades d'usuari + perfil de pacient

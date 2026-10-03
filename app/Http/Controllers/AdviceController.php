@@ -3,7 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\AdviceNotice;
-use App\Support\UrlHelper;
+use App\Support\NoticeFeed;
+use App\Support\Paged;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
@@ -23,7 +24,7 @@ class AdviceController extends Controller
 
     private function withRelations($query)
     {
-        return $query->with(['assignment:id,patientId,templateId', 'assignment.template:id,name', 'assignment.patient:id,userId,photoUrl', 'assignment.patient.user:id,name']);
+        return $query->with(NoticeFeed::noticeRelations());
     }
 
     public function today(Request $request)
@@ -33,42 +34,22 @@ class AdviceController extends Controller
             ->where('recordDate', $today)
             ->orderBy('createdAt')
             ->get()
-            ->map(fn (AdviceNotice $notice) => $this->format($notice));
+            ->map(fn (AdviceNotice $notice) => NoticeFeed::advice($notice));
 
         return response()->json($items);
     }
 
     // Històric dels consells: d'una assignació (Evolució, grup "Consells", amb ?assignmentId=) o de tots els del
-    // pacient/nutricionista (menú Avisos, sense ?assignmentId=, barrejats amb avisos i recordatoris — secció 9).
+    // pacient/nutricionista. PAGINAT (?page&perPage): { data, page, perPage, total, hasMore }. La safata del menú
+    // Avisos els barreja amb avisos i recordatoris a NoticeFeed.
     public function index(Request $request)
     {
         $query = $this->withRelations($this->own($request));
         if ($request->filled('assignmentId')) {
             $query->where('assignmentId', $request->query('assignmentId'));
         }
-        $items = $query
-            ->orderBy('recordDate', 'desc')
-            ->orderBy('createdAt', 'desc')
-            ->limit(300)
-            ->get()
-            ->map(fn (AdviceNotice $notice) => $this->format($notice));
+        $query->orderBy('recordDate', 'desc')->orderBy('createdAt', 'desc')->orderBy('id');
 
-        return response()->json($items);
-    }
-
-    private function format(AdviceNotice $notice): array
-    {
-        return [
-            'id' => $notice->id,
-            'message' => $notice->message,
-            'fieldName' => $notice->fieldName,
-            'assignmentId' => $notice->assignmentId,
-            'recordDate' => $notice->recordDate->toDateString(),
-            'routineName' => $notice->assignment->template->name,
-            // Només calen al nutricionista, per agrupar per pacient (menú Alertes).
-            'patientId' => $notice->assignment->patientId,
-            'patientName' => $notice->assignment->patient->user->name,
-            'patientPhotoUrl' => UrlHelper::toAbsoluteUrl($notice->assignment->patient->photoUrl),
-        ];
+        return response()->json(Paged::of($query, $request, fn (AdviceNotice $notice) => NoticeFeed::advice($notice)));
     }
 }

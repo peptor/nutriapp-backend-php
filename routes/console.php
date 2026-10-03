@@ -16,3 +16,7 @@ Schedule::command('reminders:evening')->dailyAt('21:30')->timezone('Europe/Madri
 // Alerta MISSING_DAYS (docs/com-funcionen-les-alertes.md, secció 10): després del recordatori del vespre,
 // perquè el dia ja s'ha donat per tancat (si ara mateix encara no té registre, ja no en tindrà).
 Schedule::command('alerts:missing-days')->dailyAt('22:00')->timezone('Europe/Madrid');
+
+// Llicències EvoPro que caduquen en pocs dies: avís per correu al nutricionista (una sola vegada per llicència;
+// docs/plans-i-llicencies.md).
+Schedule::command('licenses:remind-expiring')->dailyAt('09:00')->timezone('Europe/Madrid');

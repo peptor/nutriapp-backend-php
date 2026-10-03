@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminInvoicesController;
+use App\Http\Controllers\AdminNutricionistaController;
+use App\Http\Controllers\AdminOverviewController;
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AdviceController;
 use App\Http\Controllers\AlertsController;
@@ -49,9 +52,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('patients')->group(function () {
         Route::get('/', [PatientsController::class, 'index'])->middleware('role:NUTRICIONISTA');
         Route::post('/', [PatientsController::class, 'store'])->middleware('role:NUTRICIONISTA');
+        Route::get('/options', [PatientsController::class, 'options'])->middleware('role:NUTRICIONISTA');
         Route::get('/me/profiles', [PatientsController::class, 'myProfiles'])->middleware('role:PACIENT');
         Route::get('/{id}', [PatientsController::class, 'show']);
         Route::put('/{id}', [PatientsController::class, 'update'])->middleware('role:NUTRICIONISTA');
+        Route::put('/{id}/password', [PatientsController::class, 'setPassword'])->middleware('role:NUTRICIONISTA');
         Route::post('/{id}/photo', [PatientsController::class, 'uploadPhoto'])->middleware('role:NUTRICIONISTA');
         Route::delete('/{id}/photo', [PatientsController::class, 'deletePhoto'])->middleware('role:NUTRICIONISTA');
     });
@@ -91,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ——— Routines ———
     Route::prefix('routines')->group(function () {
         Route::get('/library', [RoutinesController::class, 'library'])->middleware('role:NUTRICIONISTA');
+        Route::get('/library/fields/{id}', [RoutinesController::class, 'libraryField'])->middleware('role:NUTRICIONISTA');
         Route::get('/foods', [RoutinesController::class, 'foods'])->middleware('role:NUTRICIONISTA,PACIENT');
         Route::get('/food-categories', [RoutinesController::class, 'foodCategories'])->middleware('role:NUTRICIONISTA,PACIENT');
         Route::get('/field-icons', [RoutinesController::class, 'fieldIcons'])->middleware('role:NUTRICIONISTA');
@@ -99,6 +105,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/field-library/{id}', [RoutinesController::class, 'fieldLibraryDestroy'])->middleware('role:NUTRICIONISTA');
         Route::post('/templates/from-library/{libraryId}', [RoutinesController::class, 'templateFromLibrary'])->middleware('role:NUTRICIONISTA');
         Route::get('/templates', [RoutinesController::class, 'templatesIndex'])->middleware('role:NUTRICIONISTA');
+        Route::get('/templates/options', [RoutinesController::class, 'templatesOptions'])->middleware('role:NUTRICIONISTA');
+        Route::get('/templates/{id}', [RoutinesController::class, 'templatesShow'])->middleware('role:NUTRICIONISTA');
         Route::post('/templates', [RoutinesController::class, 'templatesStore'])->middleware('role:NUTRICIONISTA');
         Route::put('/templates/{id}', [RoutinesController::class, 'templatesUpdate'])->middleware('role:NUTRICIONISTA');
         Route::post('/assign', [RoutinesController::class, 'assign'])->middleware('role:NUTRICIONISTA');
@@ -121,6 +129,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('alerts')->group(function () {
         Route::get('/', [AlertsController::class, 'index'])->middleware('role:NUTRICIONISTA,PACIENT');
         Route::get('/summary', [AlertsController::class, 'summary'])->middleware('role:NUTRICIONISTA,PACIENT');
+        Route::get('/feed', [AlertsController::class, 'feed'])->middleware('role:NUTRICIONISTA,PACIENT');
+        Route::get('/groups', [AlertsController::class, 'groups'])->middleware('role:NUTRICIONISTA');
         Route::get('/today', [AlertsController::class, 'today'])->middleware('role:PACIENT');
         Route::patch('/{id}/patient-seen', [AlertsController::class, 'patientSeen'])->middleware('role:PACIENT');
         Route::patch('/{id}', [AlertsController::class, 'update'])->middleware('role:NUTRICIONISTA');
@@ -183,10 +193,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // El pla (EvoDemo / EvoPro) del nutricionista autenticat i l'historial de llicències.
     Route::get('/license/me', [LicenseController::class, 'me'])->middleware('role:NUTRICIONISTA');
+    Route::get('/license/history', [LicenseController::class, 'history'])->middleware('role:NUTRICIONISTA');
 
     // Factures de la quota EvoPro del nutricionista autenticat.
     Route::get('/invoices', [InvoicesController::class, 'index'])->middleware('role:NUTRICIONISTA');
-    Route::get('/invoices/{id}', [InvoicesController::class, 'show'])->middleware('role:NUTRICIONISTA');
+    Route::get('/invoices/{id}', [InvoicesController::class, 'show'])->middleware('role:NUTRICIONISTA,ADMIN');
 
     // Cobrament d'EvoPro (Stripe Billing): pagament de la subscripció i portal de client.
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware('role:NUTRICIONISTA', 'throttle:10,1');
@@ -197,6 +208,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('admin')->middleware('role:ADMIN')->group(function () {
         Route::get('/users', [AdminController::class, 'index']);
         Route::get('/users/deleted', [AdminController::class, 'deleted']);
+        Route::get('/users/stats', [AdminController::class, 'stats']);
         Route::get('/nutricionistes', [AdminController::class, 'nutricionistes']);
         Route::get('/users/{id}', [AdminController::class, 'show']);
         Route::post('/users', [AdminController::class, 'store']);
@@ -205,5 +217,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/nutricionistes/{id}/license', [AdminController::class, 'grantLicense']);
         Route::delete('/nutricionistes/{id}/license', [AdminController::class, 'revokeLicense']);
         Route::get('/access-logs', [AdminController::class, 'accessLogs']);
+        Route::get('/invoices', [AdminInvoicesController::class, 'index']);
+        Route::get('/invoices/export', [AdminInvoicesController::class, 'export']);
+        Route::get('/overview', [AdminOverviewController::class, 'index']);
+        Route::get('/nutricionistes/{id}/overview', [AdminNutricionistaController::class, 'overview']);
+        Route::get('/nutricionistes/{id}/patients', [AdminNutricionistaController::class, 'patients']);
+        Route::get('/nutricionistes/{id}/licenses', [AdminNutricionistaController::class, 'licenses']);
+        Route::get('/nutricionistes/{id}/invoices', [AdminNutricionistaController::class, 'invoices']);
+        Route::put('/nutricionistes/{id}/notes', [AdminNutricionistaController::class, 'updateNotes']);
     });
 });

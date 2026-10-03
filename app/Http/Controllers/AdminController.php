@@ -9,7 +9,9 @@ use App\Models\AccessLog;
 use App\Models\Patient;
 use App\Models\RoutineTemplate;
 use App\Models\User;
+use App\Support\Invoices;
 use App\Support\Licenses;
+use App\Support\Paged;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -39,21 +41,63 @@ class AdminController extends Controller
         return $users;
     }
 
-    // Llista els usuaris actius (per defecte). Els usuaris eliminats (anonimitzats)
-    // es consulten a part a /users/deleted, per no comptar-los ni mostrar-los barrejats.
-    public function index()
+    // Llista els usuaris actius de primer nivell (administradors i nutricionistes), PAGINADA al servidor (norma «Llistes llargues»):
+    // { data, page, perPage, total, hasMore, deletedCount }. ?role=ALL (per defecte: administradors i, després, nutricionistes) |
+    // ADMIN | NUTRICIONISTA. Cada nutricionista porta `plan` i `patientsCount`; els seus pacients es demanen a part
+    // (AdminNutricionistaController::patients). Els usuaris eliminats (anonimitzats) es consulten a /users/deleted, sense barrejar-los.
+    public function index(Request $request)
     {
-        $users = $this->userWith()->whereNull('deletedAt')->orderBy('role')->orderBy('name')->get();
+        $role = $request->query('role', 'ALL');
+        $query = User::query()
+            ->select('sys_users.*')
+            ->selectSub(fn ($q) => $q->from('sys_patients')->join('sys_users as pu', 'pu.id', '=', 'sys_patients.userId')->whereNull('pu.deletedAt')->selectRaw('count(*)')->whereColumn('sys_patients.nutricionistaId', 'sys_users.id'), 'patientsCount')
+            ->with('licenses')
+            ->whereNull('deletedAt')
+            ->whereIn('role', in_array($role, ['ADMIN', 'NUTRICIONISTA'], true) ? [$role] : ['ADMIN', 'NUTRICIONISTA'])
+            ->orderBy('role')->orderBy('name')->orderBy('sys_users.id');
 
-        return response()->json($this->withPlan($users));
+        return response()->json(Paged::of($query, $request, fn (User $user) => $this->withPlan($user)->toArray(), 15) + [
+            'deletedCount' => User::whereNotNull('deletedAt')->count(),
+        ]);
     }
 
-    // Llista els usuaris eliminats (anonimitzats)
-    public function deleted()
+    // Comptadors del panell d'inici de l'administrador (sobre els usuaris actius), amb les altes dels últims 15 dies:
+    // { total, admin, nutri, pacient, multiNutri } i la mateixa estructura a `new`. Sense baixar cap usuari.
+    public function stats()
     {
-        $users = $this->userWith()->whereNotNull('deletedAt')->orderBy('deletedAt', 'desc')->get();
+        $cutoff = now()->subDays(15);
+        $rows = User::whereNull('deletedAt')->selectRaw('role, count(*) as n, sum(createdAt >= ?) as recent', [$cutoff])->groupBy('role')->get()->keyBy('role');
+        $of = fn (string $role, string $field) => (int) ($rows[$role]->{$field} ?? 0);
 
-        return response()->json($this->withPlan($users));
+        // Pacients amb més d'un nutricionista; «nous» si algun dels seus vincles és dels últims 15 dies.
+        $multi = DB::query()->fromSub(
+            DB::table('sys_patients')->join('sys_users', 'sys_users.id', '=', 'sys_patients.userId')->whereNull('sys_users.deletedAt')
+                ->groupBy('sys_patients.userId')->havingRaw('count(*) > 1')->selectRaw('sys_patients.userId, max(sys_patients.createdAt) as latest'),
+            'm'
+        )->selectRaw('count(*) as n, coalesce(sum(latest >= ?), 0) as recent', [$cutoff])->first();
+
+        return response()->json([
+            'total' => (int) $rows->sum('n'),
+            'admin' => $of('ADMIN', 'n'),
+            'nutri' => $of('NUTRICIONISTA', 'n'),
+            'pacient' => $of('PACIENT', 'n'),
+            'multiNutri' => (int) $multi->n,
+            'new' => [
+                'total' => (int) $rows->sum('recent'),
+                'admin' => $of('ADMIN', 'recent'),
+                'nutri' => $of('NUTRICIONISTA', 'recent'),
+                'pacient' => $of('PACIENT', 'recent'),
+                'multiNutri' => (int) $multi->recent,
+            ],
+        ]);
+    }
+
+    // Llista els usuaris eliminats (anonimitzats), PAGINADA al servidor, els últims eliminats primer.
+    public function deleted(Request $request)
+    {
+        $query = $this->userWith()->whereNotNull('deletedAt')->orderBy('deletedAt', 'desc')->orderBy('id');
+
+        return response()->json(Paged::of($query, $request, fn (User $user) => $this->withPlan($user)->toArray(), 15));
     }
 
     // Llista només nutricionistes (útil per al selector en crear/reassignar pacient)
@@ -84,7 +128,16 @@ class AdminController extends Controller
             return response()->json(['error' => 'Nutricionista no trobat'], 404);
         }
         $data = $request->validated();
-        Licenses::grant($target, $data['endsAt'], 'ADMIN', $request->user()->id, ['note' => $data['note'] ?? null]);
+        $license = Licenses::grant($target, $data['endsAt'], 'ADMIN', $request->user()->id, [
+            'note' => $data['note'] ?? null,
+            'billingPeriod' => $data['billingPeriod'] ?? 'MANUAL',
+            'amountCents' => $data['amountCents'] ?? null,
+            'currency' => isset($data['amountCents']) ? 'EUR' : null,
+        ]);
+        // Amb import cobrat, la factura s'emet i s'envia al nutricionista com un pagament més.
+        if (! empty($data['amountCents'])) {
+            Invoices::ensureForLicense($license);
+        }
 
         return response()->json($this->withPlan($this->userWith()->find($id)));
     }
@@ -271,12 +324,25 @@ class AdminController extends Controller
         return response()->json(['message' => 'Usuari eliminat correctament']);
     }
 
-    // Auditoria d'accessos a dades clíniques (RGPD): qui ha vist quin pacient/registre i quan
+    // Auditoria d'accessos a dades clíniques (RGPD): qui ha vist quin pacient/registre i quan. PAGINADA al servidor (norma
+    // «Llistes llargues»): { data, page, perPage, total, hasMore }, els més recents primer.
+    // Filtres: ?from=YYYY-MM-DD&to=YYYY-MM-DD (dates, ambdues incloses) i ?q= (part del nom o del correu de l'usuari).
     public function accessLogs(Request $request)
     {
-        $take = min((int) $request->query('take', 100), 500);
-        $logs = AccessLog::with('user:id,name,email,role')->orderBy('createdAt', 'desc')->limit($take)->get();
+        $data = $request->validate([
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'q' => ['nullable', 'string', 'max:100'],
+        ]);
+        $query = AccessLog::with('user:id,name,email,role')
+            ->when($data['from'] ?? null, fn ($q, $from) => $q->where('createdAt', '>=', $from.' 00:00:00'))
+            ->when($data['to'] ?? null, fn ($q, $to) => $q->where('createdAt', '<=', $to.' 23:59:59'))
+            ->when(trim($data['q'] ?? '') !== '', function ($q) use ($data) {
+                $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower(trim($data['q']))).'%';
+                $q->whereHas('user', fn ($u) => $u->whereRaw('lower(name) like ?', [$like])->orWhereRaw('lower(email) like ?', [$like]));
+            })
+            ->orderBy('createdAt', 'desc')->orderBy('id');
 
-        return response()->json($logs);
+        return response()->json(Paged::of($query, $request, fn (AccessLog $log) => $log->toArray(), 25));
     }
 }

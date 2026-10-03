@@ -19,7 +19,7 @@ class NutricionistaProfile extends Model
 
     protected $fillable = [
         'userId', 'companyName', 'taxId', 'collegiateNumber', 'address', 'postalCode', 'city', 'phone', 'logoUrl', 'brandingTheme',
-        'scheduleMode', 'scheduleCycleStartDate', 'scheduleCycleStartWeek',
+        'scheduleMode', 'scheduleCycleStartDate', 'scheduleCycleStartWeek', 'adminNotes',
     ];
 
     protected function casts(): array
